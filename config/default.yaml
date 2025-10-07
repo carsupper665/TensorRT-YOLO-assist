@@ -1,0 +1,30 @@
+model:
+  file_path: "models/500e.trt"
+  label_list: ['enemy','down','friend']
+  enemy_list: ['enemy','down']
+  conf: 0.35
+
+mouse:
+  aimbot_button: left
+  switch_button: x2
+
+  pidx_kp: 3.65  #1.12
+  pidx_kd: 3.54 #3.51
+  pidx_ki: 0
+
+  pidy_kp: 1.22
+  pidy_kd: 0.24   
+  pidy_ki: 0.0
+
+  smooth: 0.8
+  mag: 2
+  serial_port: "COM3"
+
+
+resolution_x: 1920
+resolution_y: 1080
+
+visualization: False
+
+debug: True # Works well with UI
+log_level: "info" # Options: debug, info, warning, error, Only works when running in no-GUI mode
