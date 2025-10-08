@@ -41,7 +41,7 @@ class loggerFactory:
                  path: str = "./logs"):
         
         if isinstance(log_level, str):
-            log_level = logging._nameToLevel.get(log_level, logging.INFO)
+            log_level = logging._nameToLevel.get(log_level.upper(), logging.INFO)
         
         self.write_log = write_log
         log_path = os.path.join(os.getcwd(), path)

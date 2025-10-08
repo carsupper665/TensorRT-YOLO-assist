@@ -19,24 +19,24 @@ class Main(QObject):
     on_exception = pyqtSignal(type, Exception)
     finished = pyqtSignal()
     on_trigger = pyqtSignal(bool)
-    def __init__(self, no_gui: bool = True, level: str = ""):
-        self.LOGGER = loggerFactory(log_level="DEBUG", logger_name="AimSys").getLogger()
+    # TODO 重新 改動 cfg
+    def __init__(self, no_gui: bool = True, level: str = None):
         self.running = False
         self.args = self.load_yaml("config/config.yaml")
-        log_level = self.args.get("log_level", "WARNING")
         debug = self.args.get("debug", False)
 
+        log_level = self.args.get("log_level", "WARNING")
         if debug:
             log_level = "DEBUG"
-        
-        if level != "":
+        if level != None:
             log_level = level
 
-        self.LOGGER.setLevel(log_level.upper())
+        self.LOGGER = loggerFactory(log_level=log_level, logger_name="AimSys").getLogger()
+
 
         self.no_gui = no_gui
 
-        print(f"{C['cyan']}Log level set to: {log_level}{C['r']}\n")
+        self.LOGGER.info(f"{C['cyan']}Log level set to: {log_level}{C['r']}\n")
 
         self.LOGGER.debug(f"Arguments: {self.args}, NO GUI: {no_gui}")
         

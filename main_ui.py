@@ -122,7 +122,7 @@ class MainUI(QMainWindow):
             # self.hide()
             return
         
-        self.aim_sys = Main(no_gui=False)
+        self.aim_sys = Main(no_gui=False, level=self.LOGGER.level)
         self._prepare_worker()
         
 
@@ -167,7 +167,7 @@ class MainUI(QMainWindow):
             self.work_thread.wait()
         self.home_page.set_running(False)
         self.osd.hide()
-        self.toast.show_notice(INFO, "系統停止", "AI輔助瞄準系統已停止。", 2000, px=self._get_x(), py=self._get_y())
+        self.toast.show_notice(INFO, "系統停止", "AI輔助瞄準系統已停止。", 3000, px=self._get_x(), py=self._get_y())
 
     @pyqtSlot()
     def _restart_aim_sys(self):
@@ -178,7 +178,7 @@ class MainUI(QMainWindow):
             del(self.aim_sys)
             self.aim_sys = None
             Main = _reload_main_class()
-            self.aim_sys = Main(no_gui=False)
+            self.aim_sys = Main(no_gui=False, level=self.LOGGER.level)
             self._prepare_worker()
             self.home_page.set_restart_enabled(True)
             self.toast.show_notice(INFO, "Aim Sys Restarted", "Aim Sys restarted successfully.", 3000, px=self._get_x(), py=self._get_y())

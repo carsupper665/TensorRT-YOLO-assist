@@ -3,9 +3,11 @@ import os, sys, pathlib
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # e.x python.exe start.py --trt_ver 'v12.6' --log 'info'
     parser.add_argument("--no-gui", action="store_true", help="Run without GUI")
     parser.add_argument("--trt_path", type=str, default="", help=r"Path to TensorRT (usally call C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\vX.X\\lib\\x64)")
     parser.add_argument("--trt_ver", type=str, default="", help=r"TensorRT Ver")
+    parser.add_argument("--log", type=str, default="ERROR", help="log level")
     args = parser.parse_args()
 
     if args.trt_ver or args.trt_path:
@@ -22,7 +24,7 @@ if __name__ == "__main__":
     #     os.add_dll_directory(cuda_lib)  # 不污染系統 PATH
 
     # 3) 需要時再動態擴充本行程 PATH（前置以較高優先）
-    print(cuda_lib)
+    print("Cuda Path: ", cuda_lib)
     os.environ["PATH"] = cuda_lib + os.pathsep + os.environ.get("PATH", "")
     
     if args.no_gui:
@@ -36,7 +38,7 @@ if __name__ == "__main__":
         import sys
 
         app = QApplication(sys.argv)
-        window = MainUI()
+        window = MainUI(args.log)
         window.show()
         # window._clear_all()
         sys.exit(app.exec())
