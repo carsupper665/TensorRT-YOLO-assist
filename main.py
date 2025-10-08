@@ -2,6 +2,7 @@
 import os
 import time
 import dxcam
+import numpy as np
 from simple_pid import PID
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
 from utils.logger import loggerFactory, C
@@ -10,15 +11,17 @@ from inference import BaseEngine
 from ui import SerialPortNotFound
 from pynput.mouse import Button, Listener
 from pynput import keyboard as KB
+from math import atan2
+from serial.serialutil import PortNotOpenError
 
 class Main(QObject):
-    image_queue = pyqtSignal(object, object, object, object)  # img, boxes, scores, cls_inds
+    image_queue = pyqtSignal(object, object, object, object, float)  # img, boxes, scores, cls_inds
     on_exception = pyqtSignal(type, Exception)
     finished = pyqtSignal()
+    on_trigger = pyqtSignal(bool)
     def __init__(self, no_gui: bool = True, level: str = ""):
         self.LOGGER = loggerFactory(log_level="DEBUG", logger_name="AimSys").getLogger()
         self.running = False
-        # self.LOGGER.info(f"TEST =====================")
         self.args = self.load_yaml("config/config.yaml")
         log_level = self.args.get("log_level", "WARNING")
         debug = self.args.get("debug", False)
@@ -29,7 +32,7 @@ class Main(QObject):
         if level != "":
             log_level = level
 
-        self.LOGGER.setLevel(log_level)
+        self.LOGGER.setLevel(log_level.upper())
 
         self.no_gui = no_gui
 
@@ -80,13 +83,21 @@ class Main(QObject):
         return data
     
     def init_camera(self):
+        self.cam_type = self.args.get("camera", "dxcam")
         self.screen_width, self.screen_height = self.args.get("resolution_x", None), self.args.get("resolution_y", None)
         self.detect_length = 640
         top  = self.screen_height // 2 - self.detect_length // 2
         left = self.screen_width  // 2 - self.detect_length // 2
         self.box = (left, top, left + self.detect_length, top + self.detect_length)
-        self.cam = dxcam.create(output_idx=0, output_color="BGRA")
-        self.LOGGER.debug(f"Camera initialized.")
+
+        if self.cam_type == "dxcam":
+            self.cam = dxcam.create(output_idx=0, output_color="BGRA")
+            self.grab_screen = self._dx_grab_screen
+        else:
+            self.grab_screen = self._mss_grab_screen 
+
+        self.LOGGER.debug(f"Camera initialized., cam type: {self.cam_type}")
+        
 
     def init_parms(self):
         self.smooth = self.args.get("mouse", None).get("smooth", None) * 1920 / self.args.get("resolution_x", None)
@@ -103,6 +114,13 @@ class Main(QObject):
         self.pidx = PID(pidx_kp, pidx_kd, pidx_ki, setpoint=0, sample_time=0.001,)
         self.pidy = PID(pidy_kp, pidy_kd, pidy_ki, setpoint=0, sample_time=0.001,)
         self.pidx(0),self.pidy(0)
+        self.conf = self.args["model"]["conf"]
+        self.label = self.args['model']['label_list']
+        self.enemy_label = self.args['model']['enemy_list']
+        self.pos_factor = self.args['mouse']['pos_factor']
+        self.max_lock_dis = self.args['mouse']["max_lock_dis"]
+        self.max_step_dis = self.args["mouse"]["max_step_dis"]
+        self.max_pid_dis = self.args["mouse"]["max_pid_dis"]
         self.detect_center_x, self.detect_center_y = self.detect_length//2, self.detect_length//2
         self.LOGGER.debug(f"Parameters initialized.")
 
@@ -123,17 +141,43 @@ class Main(QObject):
         self.LOGGER.debug(f"Engine initialized with model at {path}.")
     
     def init_listeners(self):
-        self.kb_Listener = KB.Listener(on_press=self.on_press)
+        self.down = set()
+        self.kb_Listener = KB.Listener(on_press=self.on_press, on_release=self.on_release)
         self.listener = Listener(on_click=self.on_click)
 
         self.toggle_aim = self.args['mouse']['switch_button']
         self.toggle_aiming = self.args['mouse']['aimbot_button']
-        self.aim = False
-        self.aiming = False
+        self.toggle_silent = self.args['mouse']['slient_button']
+        self.slient_aim_btn = self.args['mouse']['slient_aim']
+        self.aim            = False
+        self.aiming         = False
+        self.slient_aim     = False
+        self.slient_aiming  = False
 
         self.LOGGER.debug("Input listeners initialized.")
-    
+
+    def on_release(self, key):
+        k = f"{key}"
+        self.LOGGER.debug(f"Key released: {key}")
+        # if key == getattr(KB.Key, self.toggle_silent):
+        #     self.slient_aim = not self.slient_aim
+        #     self.LOGGER.info(f"slient aim {'ON' if self.slient_aim else 'OFF'}")
+
+        # if k == "Key." + self.slient_aim_btn or k == self.slient_aim_btn:
+        #     self.slient_aiming = not self.slient_aiming
+        #     self.LOGGER.info(f"slient Shoot {'ON' if self.slient_aiming else 'OFF'}")
+
+        if k in self.down:
+            self.down.remove(k)
+        
     def on_press(self, key):
+        k = f"{key}"
+        if k in self.down:
+            return          # 忽略重複 press
+        self.down.add(f"{k}")
+        # if k == "Key." + self.slient_aim_btn or k == self.slient_aim_btn:
+        #     self.slient_aiming = not self.slient_aiming
+        #     self.LOGGER.info(f"slient Shoot {'ON' if self.slient_aiming else 'OFF'}")
         self.LOGGER.debug(f"Key pressed: {key}")
 
     def on_click(self, x, y, button, pressed):
@@ -141,29 +185,117 @@ class Main(QObject):
         if button == getattr(Button, self.toggle_aim):
             if pressed:
                 self.aim = not self.aim
-                self.LOGGER.info(f"Aimbot toggled to {'ON' if self.aim else 'OFF'}")
+                self.LOGGER.info(f"{C['green']if self.aim else C['red']}Aimbot toggled to {'ON' if self.aim else 'OFF'}")
+                if not self.no_gui:
+                    self.on_trigger.emit(self.aim)
 
         if button == getattr(Button, self.toggle_aiming) and self.aim:
             self.aiming = pressed
             self.LOGGER.info(f"Aimbot aiming {'started' if pressed else 'stopped'}")
 
-    def grab_screen(self):
-        frame = self.cam.get_latest_frame()
-        return frame
+    # def grab_screen(self):
+    #     return self.cam.get_latest_frame()
+
+    def _dx_grab_screen(self):
+        return self.cam.get_latest_frame()
+    
+    def _mss_grab_screen(self):
+        return np.asarray(self.cam.grab(self.box))
+    
+    def target_list(self, boxes, confidences, classes):
+        # boxes: Nx4, confidences: N, classes: N
+        if len(boxes) == 0:
+            return None
+
+        conf_mask = confidences >= self.conf
+        if not np.any(conf_mask):
+            return None
+
+        boxes = boxes[conf_mask]
+        classes = classes[conf_mask]
+
+        # 過濾敵對類別
+        enemy_ids = np.array([self.label.index(lbl) for lbl in self.enemy_label], dtype=classes.dtype)
+        enemy_mask = np.isin(classes, enemy_ids)
+        if not np.any(enemy_mask):
+            return None
+
+        boxes = boxes[enemy_mask]
+        # 中心點與準星距離
+        cx = (boxes[:,0] + boxes[:,2]) * 0.5
+        cy = (boxes[:,1] + boxes[:,3]) * 0.5 - self.pos_factor * (boxes[:,3] - boxes[:,1])
+        dx = cx - self.detect_center_x
+        dy = cy - self.detect_center_y
+        dis = np.hypot(dx, dy)
+
+        # 距離門檻
+        ok = dis < self.max_lock_dis
+        if not np.any(ok):
+            return None
+
+        # 取最近者
+        idx = np.argmin(dis[ok])
+        # 回傳最小必要資訊
+        sel = np.flatnonzero(ok)[idx]
+        return cx[sel], cy[sel], dis[sel], boxes[sel]
+    
+    def get_move_dis_fast(self, cx, cy, dis):
+        rel_x = (cx - self.detect_center_x) * self.smooth
+        rel_y = (cy - self.detect_center_y) * self.smooth
+
+        if dis >= self.max_step_dis:
+            k = self.max_step_dis / dis
+            rel_x *= k; rel_y *= k
+        elif dis <= self.max_pid_dis:
+            # 直接用誤差，不再 atan2
+            rel_x = self.pidx(-rel_x)
+            rel_y = self.pidy(-rel_y)
+            # rel_x = self.pidx(atan2(-rel_x, self.detect_length))
+            # rel_y = self.pidy(atan2(-rel_y, self.detect_length))
+        return rel_x, rel_y
+    
+    def lock_target(self, T, s=0.7):
+        if T is None or not self.aiming:
+            self.pidx(0); self.pidy(0)
+            return
+        
+        moveto_x, moveto_y = self.get_move_dis_fast(T[0], T[1], T[2])
+
+        self.m.send_mouse_move(moveto_x*s, moveto_y*s, False)
+        # self.LOGGER.debug(f"MOVE {int(moveto_x*s)}, {int(moveto_y*s)}")
+
+        self.pidx(0); self.pidy(0)
+
+    def slient(self, T):
+        if T is None or not self.slient_aiming:
+            return
+        
+        rel_x = (T[0] - self.detect_center_x)
+        rel_y = (T[1] - self.detect_center_y)
+        self.m.send_mouse_move(rel_x, rel_y, True)
     
     def forward(self, ):
         is_aim = self.aim
+        is_slient = self.slient_aim
         img = self.grab_screen()
-        # if img is None:
-        #     self.LOGGER.warning("No frame captured from camera.")
-        #     return
-        # if is_aim:
-        #     boxes, confidences, classes = self.engine.forward(img)
-        #     if not self.no_gui:
-        #         self.image_queue.emit(img, boxes, confidences, classes)
-        # else:
-        #     self.image_queue.emit(img, None, None, None)
-        # pass
+
+        if img is None:
+            self.LOGGER.warning("No frame captured from camera.")
+            return
+        
+        if is_aim or is_slient:
+            boxes, confidences, classes = self.engine.forward(img)
+            T = self.target_list(boxes, confidences, classes)
+            if is_aim:
+                self.lock_target(T)
+
+            # if is_slient:
+            #     self.slient(T)
+
+            if not self.no_gui:
+                self.image_queue.emit(img, boxes, confidences, classes, self.conf)
+        else:
+            self.image_queue.emit(img, None, None, None, self.conf)
 
     @pyqtSlot()
     def start(self):
@@ -174,19 +306,37 @@ class Main(QObject):
         self.LOGGER.info("Starting main process")
 
         try:
-            self.cam.start(region=self.box, target_fps=144)
-            time.sleep(0.2) # warmup
+
+            if self.cam_type == "dxcam":
+                self.cam.start(region=self.box, target_fps=144)
+                time.sleep(0.3) # warmup
+                if not self.cam.is_capturing:
+                    raise RuntimeError("Camera failed to start capturing.")
+            else:
+                from mss import mss
+                self.cam = mss()
+            
             if self.m is None:
+                self.LOGGER.info("reconnect USB.")
                 self.m = USBMouse(self.args.get("mouse", None).get("serial_port", None))
+            try:
+                self.m.send_mouse_move(0, 0)
+            except PortNotOpenError as pnoe:
+                self.LOGGER.warning(f"{pnoe}, USB serial Port {self.args['mouse']['serial_port']} is close.")
+                self.m.open()
+            except Exception as e:
+                raise e
+
+            # if self.engine is None:
+            #     self.init_engine()
 
             if not self.listener.is_alive() and not self.kb_Listener.is_alive():
                 self.kb_Listener = self.listener = None
                 self.init_listeners()
             self.kb_Listener.start()
             self.listener.start()
-            if not self.cam.is_capturing:
-                raise RuntimeError("Camera failed to start capturing.")
-            
+
+           
             while self.running:
                 self.forward()
                 
@@ -197,12 +347,16 @@ class Main(QObject):
         except KeyboardInterrupt:
             self.LOGGER.info("KeyboardInterrupt received. Stopping...")
         finally:
-            self.cam.stop()
+            time.sleep(0.3) # wait ui
+
+            if self.cam_type == "dxcam":
+                self.cam.stop()
 
             self.kb_Listener.stop()
             self.listener.stop()
 
-            self.m.close()
+            self.m.close() 
+
             self.running = False
             self.LOGGER.info("Main process stopped")
             if not self.no_gui:
@@ -210,15 +364,25 @@ class Main(QObject):
                 self.finished.emit()
 
     def cleanup(self):
-        if self.cam and self.cam.is_capturing:
-            self.cam.stop()
+        if self.cam:
+            if self.cam_type == "dxcam"and self.cam.is_capturing:
+                self.cam.stop()
+                del(self.cam)
+
         if self.kb_Listener and self.kb_Listener.running:
             self.kb_Listener.stop()
+
         if self.listener and self.listener.running:
             self.listener.stop()
+
         if self.m:
             self.m.close()
             self.m = None
+            del(self.m)
+
+        if self.engine:
+            self.engine.close()
+
         self.LOGGER.info("Cleaned up resources.")
 
     @pyqtSlot()

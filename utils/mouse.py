@@ -4,7 +4,6 @@ class USBMouse:
     def __init__(self, device: str = "COM10"):
         self.serialcomm = serial.Serial(device, 115200, timeout=0.1)
 
-
     def send_mouse_move(self, dx, dy, silent=False):
         """
         給定滑鼠 X、Y 的位移量，透過 Serial 傳給 Arduino 控制滑鼠移動。
@@ -21,6 +20,9 @@ class USBMouse:
 
     def close(self):
         self.serialcomm.close()
+
+    def open(self):
+        self.serialcomm.open()
 
 def usb_com_ports():
     out = []

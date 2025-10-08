@@ -14,6 +14,8 @@ import sys
 from packaging.tags import sys_tags
 from packaging.utils import parse_wheel_filename
 from src.logger import loggerFactory, C
+import json
+from pprint import pformat
 # from cuda import cudart
 # import importlib, pkgutil, cuda
 
@@ -28,6 +30,7 @@ class MainUI(QMainWindow):
         self.setWindowTitle("手殘黨")
         self.resize(16*75, 9*75)
         self.setStyleSheet("background-color: #212121;")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
         self.aim_sys = None  # Main instance
 
@@ -63,17 +66,22 @@ class MainUI(QMainWindow):
         self.home_page = HomePage(self)
         self.visualize_page = VisualizePage(self)
         self.setting_page = SettingPage(self)
+        self.osd = OSD(self)
+        self.osd.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         pages = [self.home_page, self.setting_page, self.visualize_page, self.loading_page]
         for page in pages:
             self.content_widget.addWidget(page)
             if page.objectName() != "LoadingPage":
                 page.on_exception.connect(self._on_exception)
         self.content_widget.setCurrentIndex(len(pages)-1)
+        self.visualize_page.osd_fps.connect(self.osd._on_fps)
         # self.content_widget.setCurrentIndex(0)
 
         self.home_page.startRequested.connect(self._start_aim_sys)
         self.home_page.stopRequested.connect(self._stop_aim_sys)
         self.home_page.restartRequested.connect(self._restart_aim_sys)
+
+        self.osd.stop_aim_sys.connect(self._stop_aim_sys)
 
     def _run_start_up(self):
         self.loading_thread = QThread()
@@ -133,9 +141,10 @@ class MainUI(QMainWindow):
         self.work_thread.started.connect(self.aim_sys.start, type=Qt.ConnectionType.QueuedConnection)
 
         self.aim_sys.on_exception.connect(self._on_exception)
-        self.aim_sys.image_queue.connect(self.visualize_page.on_image)
+        self.aim_sys.image_queue.connect(self.visualize_page.on_image, type=Qt.ConnectionType.QueuedConnection)
         self.aim_sys.finished.connect(self.work_thread.quit)
         self.aim_sys.finished.connect(lambda: self.home_page.set_running(False))
+        self.aim_sys.on_trigger.connect(self.osd.on_trigger)
 
         self.aim_sys.init_all()
     
@@ -146,25 +155,27 @@ class MainUI(QMainWindow):
             return
         self.home_page.set_running(True)
         self.work_thread.start()
+        self.osd.show_osd()
         self.toast.show_notice(INFO, "系統啟動", "AI輔助瞄準系統已啟動。", 3000, px=self._get_x(), py=self._get_y())
 
     @pyqtSlot()
     def _stop_aim_sys(self):
         if self.aim_sys:
-            self.aim_sys.stop()          # 讓 while 退出
+            self.aim_sys.stop()
         if self.work_thread and self.work_thread.isRunning():
             self.work_thread.quit()
             self.work_thread.wait()
         self.home_page.set_running(False)
+        self.osd.hide()
         self.toast.show_notice(INFO, "系統停止", "AI輔助瞄準系統已停止。", 2000, px=self._get_x(), py=self._get_y())
 
     @pyqtSlot()
     def _restart_aim_sys(self):
         self.LOGGER.info("Restarting aim sys process...")
-        # self.home_page.restart_btn.setDisabled(True)
-        # self.home_page.set_restart_enabled(False)
         try:
             self._stop_aim_sys()
+            self.aim_sys.cleanup()
+            del(self.aim_sys)
             self.aim_sys = None
             Main = _reload_main_class()
             self.aim_sys = Main(no_gui=False)
@@ -237,7 +248,16 @@ class StartUp(QObject):
         try:
             self.emit_helper("env_check", value, "Checking system environment...")
             time.sleep(2)
-            self.env_check(value)
+            res = self.env_check(value)
+            # 格式化 env_check 的回傳結果，優先用 JSON（多行），若含不可序列化物件則退到 pformat
+            try:
+                formatted_res = json.dumps(res, indent=2, ensure_ascii=False)
+            except Exception:
+                try:
+                    formatted_res = pformat(res, width=120, compact=False)
+                except Exception:
+                    formatted_res = str(res)
+            self.logger.info("env check result:\n%s", formatted_res)
             value = 41
             self.emit_helper("init_AimSys", value, "Initializing system...")
 
@@ -260,11 +280,8 @@ class StartUp(QObject):
                 self._exception.emit(type(e), e)
         except Exception as e:
             self.emit_helper("error", value, str(e))
-            # self.res.emit(e)
             self._exception.emit(type(e), e)
         finally:
-            from utils.export import onnx_to_trt
-
             for i in range(value + 1 , 101):
                 self.emit_helper("start_up_end", i, None)
                 time.sleep(0.02)
@@ -302,10 +319,10 @@ class StartUp(QObject):
         import importlib
         from importlib import metadata
         try:
-            self.logger.info(f"Importing {mod}...")
             m = importlib.import_module(mod)           # 真的 import，避免假陽性
             try:
                 ver = metadata.version(mod.split('.')[0])
+                self.logger.info(f"{mod} version: {ver}")
             except metadata.PackageNotFoundError:
                 ver = getattr(m, "__version__", "?")
                 self.logger.warning(f"Cannot find version for {mod}, fallback to {ver}")
@@ -314,7 +331,7 @@ class StartUp(QObject):
             self.logger.error(f"Module {mod} not found.")
             return False, None, e
         except FileNotFoundError as fne:
-            self.logger.critical(f"If nvinfer_10.dll is missing, you can set path by using --trt_path (your TensorRT install path) manually.")
+            self.logger.critical(f"If nvinfer_10.dll is missing, you can set ver by using --trt_ver (your TensorRT installver) manually.")
             raise fne
         except Exception as e:
             # raise e
@@ -399,7 +416,7 @@ class StartUp(QObject):
                          v10=True, end2end=True)
             self.logger.info(f"Model file {model_path} built successfully.")
             self.emit_helper("env_check", None, f"Model file {model_path} built successfully.\nBuilding secnond model...")
-            onnx_to_trt(onnx_path="models/180e.onnx", engine_path="models/180e.trt",)
+            onnx_to_trt(onnx_path="models/180e.onnx", engine_path="models/180e.trt",v10=True, end2end=True)
             
 
         return result
@@ -434,9 +451,9 @@ def _reload_main_class(module_name="main", class_name="Main"):
         mod = importlib.reload(mod)                  # 之後重載
     return getattr(mod, class_name)
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainUI()
-    window.show()
-    sys.exit(app.exec())
+# if __name__ == "__main__":
+#     app = QApplication(sys.argv)
+#     window = MainUI()
+#     window.show()
+#     sys.exit(app.exec())
 

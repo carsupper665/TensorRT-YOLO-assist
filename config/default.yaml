@@ -7,7 +7,12 @@ model:
 mouse:
   aimbot_button: left
   switch_button: x2
+  silent_button: alt_gr
 
+  max_lock_dis: 100
+  max_step_dis: 30
+  max_pid_dis: 50
+  pos_factor: 0.02
   pidx_kp: 3.65  #1.12
   pidx_kd: 3.54 #3.51
   pidx_ki: 0
@@ -20,11 +25,9 @@ mouse:
   mag: 2
   serial_port: "COM3"
 
-
 resolution_x: 1920
 resolution_y: 1080
-
-visualization: False
+# camera: "mss" # Use this option for better performance on low refresh rate monitors.
 
 debug: True # Works well with UI
 log_level: "info" # Options: debug, info, warning, error, Only works when running in no-GUI mode

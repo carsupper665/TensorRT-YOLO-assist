@@ -3,150 +3,144 @@ from cuda import cudart
 import numpy as np
 import cv2
 
-from utils import common 
+from utils import common
 
-# os.environ["PATH"] += f";v11.8;v11.8\\bin;v11.8\\lib"
-# os.environ["CUDA_MODULE_LOADING"] = "LAZY"
-# os.environ["PATH"] += os.pathsep + r"./dll"
-# os.environ["CUDA_MODULE_LOADING"]="LAZY"
-# @staticmethod
 class BaseEngine(object):
-    def __init__(self, engine_path,):
+    def __init__(self, engine_path):
         self.mean = None
         self.std = None
         self.n_classes = 3
-        self.class_names = ['enm', 
-                            'down', 
-                            'friend']
+        self.class_names = ['enm', 'down', 'friend']
 
-        logger = trt.Logger(trt.Logger.WARNING)
-        logger.min_severity = trt.Logger.Severity.ERROR
+        logger = trt.Logger(trt.Logger.ERROR)
+        trt.init_libnvinfer_plugins(logger, "")
         runtime = trt.Runtime(logger)
-        trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins
+
         with open(engine_path, "rb") as f:
-            serialized_engine = f.read()
-        self.engine = runtime.deserialize_cuda_engine(serialized_engine)
-        self.imgsz = self.engine.get_tensor_shape(self.engine.get_tensor_name(0))[2:]  # get the read shape of model, in case user input it wrong
+            self.engine = runtime.deserialize_cuda_engine(f.read())
+
+        # 讀模型輸入尺寸 (CHW 或 NCHW 的 HW)
+        in_name0 = self.engine.get_tensor_name(0)
+        in_shape0 = list(self.engine.get_tensor_shape(in_name0))
+        self.imgsz = in_shape0[-2:]  # H, W
+
         self.context = self.engine.create_execution_context()
 
-        # Setup I/O bindings
-        self.inputs = []
-        self.outputs = []
-        self.allocations = []
-
-        # self.stream = cuda.Stream()
-
+        # ---- 一次性配置 I/O ----
+        self.inputs, self.outputs, self.allocations = [], [], []
         for i in range(self.engine.num_io_tensors):
             name = self.engine.get_tensor_name(i)
-            dtype = self.engine.get_tensor_dtype(name)
-            shape = self.engine.get_tensor_shape(name)
-            is_input = False
+            dtype = np.dtype(trt.nptype(self.engine.get_tensor_dtype(name)))
+            shape = list(self.engine.get_tensor_shape(name))
+
+            # 動態輸入則設定實際形狀（例如 1x3x640x640）
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                is_input = True
-            if is_input:
-                self.batch_size = shape[0]
-            size = np.dtype(trt.nptype(dtype)).itemsize
+                if any(d < 0 for d in shape):  # 動態
+                    if len(shape) == 4:   # NCHW
+                        shape = [1, shape[1] if shape[1] > 0 else 3, self.imgsz[0], self.imgsz[1]]
+                        self.context.set_input_shape(name, tuple(shape))
+                    elif len(shape) == 3: # CHW
+                        shape = [shape[0] if shape[0] > 0 else 3, self.imgsz[0], self.imgsz[1]]
+                        self.context.set_input_shape(name, tuple(shape))
+
+            nbytes = dtype.itemsize
             for s in shape:
-                size *= s
-            allocation = common.cuda_call(cudart.cudaMalloc(size))
-            binding = {
-                'index': i,
-                'name': name,
-                'dtype': np.dtype(trt.nptype(dtype)),
-                'shape': list(shape),
-                'allocation': allocation,
-                'size': size
-            }
-            self.allocations.append(allocation)
+                nbytes *= s
+            # GPU 配置
+            d_ptr = common.cuda_call(cudart.cudaMalloc(nbytes))
+            self.allocations.append(d_ptr)
+
+            b = {"index": i, "name": name, "dtype": dtype, "shape": shape,
+                 "allocation": d_ptr, "size": nbytes}
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                self.inputs.append(binding)
+                self.inputs.append(b)
             else:
-                self.outputs.append(binding)
+                self.outputs.append(b)
+
+        # 預先建立主機輸出緩衝，避免每幀分配
+        self.h_outputs = [np.empty(o["shape"], dtype=o["dtype"]) for o in self.outputs]
+
+        # CUDA stream
+        self.stream = cudart.cudaStreamCreate()[1]
+
+        # v3：把每個 tensor 綁定到位址（僅需做一次）
+        for b in (self.inputs + self.outputs):
+            self.context.set_tensor_address(b["name"], int(b["allocation"]))
 
     def output_spec(self):
-        """
-        Get the specs for the output tensors of the network. Useful to prepare memory allocations.
-        :return: A list with two items per element, the shape and (numpy) datatype of each output tensor.
-        """
-        specs = []
-        for o in self.outputs:
-            specs.append((o['shape'], o['dtype']))
-        return specs
+        return [(o["shape"], o["dtype"]) for o in self.outputs]
 
     def infer(self, img):
-        outputs = []
-        for shape, dtype in self.output_spec():
-            outputs.append(np.zeros(shape, dtype))
+        # 轉型為引擎期望 dtype，確保連續
+        inp = np.ascontiguousarray(img, dtype=self.inputs[0]["dtype"])
+        # H2D
+        cudart.cudaMemcpyAsync(
+            self.inputs[0]["allocation"],                        # dst: device ptr
+            inp.ctypes.data,                                     # src: host ptr
+            inp.nbytes,
+            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
+            self.stream
+        )
+        # 執行
+        self.context.execute_async_v3(self.stream)
 
-        # Process I/O and execute the network.
-        common.memcpy_host_to_device(self.inputs[0]['allocation'], np.ascontiguousarray(img))
+        # D2H 所有輸出
+        for i, o in enumerate(self.outputs):
+            cudart.cudaMemcpyAsync(
+                self.h_outputs[i].ctypes.data,                   # dst: host ptr
+                o["allocation"],                                 # src: device ptr
+                o["size"],
+                cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+                self.stream
+            )
 
-        # stream_handle = int(self.cuda_stream)  # 获取整数类型的流句柄
-        # self.context.execute_async_v3(bindings=self.allocations, stream_handle=stream_handle)
-        self.context.execute_v2(self.allocations)
-
-        for o in range(len(outputs)):
-            common.memcpy_device_to_host(outputs[o], self.outputs[o]['allocation'])
-        return outputs
-
+        cudart.cudaStreamSynchronize(self.stream)
+        return self.h_outputs
 
     def forward(self, image, swap=(2, 0, 1)):
-        # img = np.ascontiguousarray(image.transpose(2,0,1)/255.0, dtype=np.float32)
-        img = image
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # 若你的 engine 已內含前處理與 NMS，這段可對齊 engine 期待的輸入
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         img = img.transpose(swap)
-        img = np.ascontiguousarray(img, dtype=np.float32) / 255.
-        
-        # im, ratio, dwdh = letterbox(img, (640, 640))
-        num, final_boxes, final_scores, final_cls_inds  = self.infer(img)
-        ratio, dwdh = 1.0 ,(0.0, 0.0)
+        img = np.ascontiguousarray(img, dtype=np.float32) / 255.0
+
+        num, final_boxes, final_scores, final_cls_inds = self.infer(img)
+        ratio, dwdh = 1.0, (0.0, 0.0)
 
         dwdh = np.asarray(dwdh * 2, dtype=np.float32)
         final_boxes -= dwdh
-        final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
+        final_boxes = np.reshape(final_boxes / ratio, (-1, 4))
         final_scores = np.reshape(final_scores, (-1, 1))
         final_cls_inds = np.reshape(final_cls_inds, (-1, 1))
-        dets = np.concatenate([np.array(final_boxes)[:int(num[0])], np.array(final_scores)[:int(num[0])], np.array(final_cls_inds)[:int(num[0])]], axis=-1)
+        dets = np.concatenate(
+            [
+                np.array(final_boxes)[: int(num[0])],
+                np.array(final_scores)[: int(num[0])],
+                np.array(final_cls_inds)[: int(num[0])],
+            ],
+            axis=-1,
+        )
 
         if dets is not None:
-            final_boxes, final_scores, final_cls_inds = dets[:,
-                                                             :4], dets[:, 4], dets[:, 5]
-        # print(final_boxes, final_scores, final_cls_inds)
+            final_boxes, final_scores, final_cls_inds = dets[:, :4], dets[:, 4], dets[:, 5]
         return final_boxes, final_scores, final_cls_inds
-        # print(final_boxes)
-        # print(num)
+    
+    def close(self):
+        try:
+            cudart.cudaStreamSynchronize(self.stream)
+        except Exception:
+            pass
+        # 先毀掉 stream，再釋放 device 記憶體
+        try:
+            if getattr(self, "stream", None):
+                cudart.cudaStreamDestroy(self.stream)
+                self.stream = None
+        except Exception:
+            pass
+        for ptr in getattr(self, "allocations", []):
+            try: cudart.cudaFree(ptr)
+            except Exception: pass
+        self.allocations = []
+        # 斷開參照，讓 Python GC 回收 TensorRT 物件
+        self.context = None
+        self.engine = None
 
-def  letterbox(im,
-            new_shape = (640, 640),
-            color = (114, 114, 114),
-            swap=(2, 0, 1)):
-    shape = im.shape[:2]  # current shape [height, width]
-    if isinstance(new_shape, int):
-        new_shape = (new_shape, new_shape)
-    # new_shape: [width, height]
-
-    # Scale ratio (new / old)
-    r = min(new_shape[0] / shape[1], new_shape[1] / shape[0])
-    # Compute padding [width, height]
-    new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
-    dw, dh = new_shape[0] - new_unpad[0], new_shape[1] - new_unpad[
-        1]  # wh padding
-
-    dw /= 2  # divide padding into 2 sides
-    dh /= 2
-
-    if shape[::-1] != new_unpad:  # resize
-        im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
-    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(im,
-                            top,
-                            bottom,
-                            left,
-                            right,
-                            cv2.BORDER_CONSTANT,
-                            value=color)  # add border
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-    im = im.transpose(swap)
-    im = np.ascontiguousarray(im, dtype=np.float32) / 255.
-    return im, r, (dw, dh)

@@ -9,12 +9,16 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QProgressBar,
 )
-from PyQt6.QtCore import Qt, QTimer, QDateTime, pyqtSlot, pyqtSignal, QRect
+from PyQt6.QtCore import Qt, QTimer, QDateTime, pyqtSlot, pyqtSignal, QRect, QElapsedTimer
+import time
+from collections import deque
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QFontMetrics
 import cv2
+import math
 
 class VisualizePage(QWidget):
     on_exception = pyqtSignal(object, object)
+    osd_fps = pyqtSignal(str)
     def __init__(self, parent):
         super().__init__(parent)
         self.setObjectName("VisualizePage")
@@ -43,6 +47,14 @@ class VisualizePage(QWidget):
         # self.view.setMinimumSize(640, 640)
         self._pix = None
         self._last_update = None
+        # FPS 計算：儲存最近 N 次訊號的時間戳
+        self._fps_tau = 0.5          # 平滑時間常數(秒)，0.3~1.0 視需求
+        self._dt_ema = None          # 平滑後的 dt
+        self._fps = 0.0
+        self._fps_text = "FPS: --"
+
+        self._fps_timer = QElapsedTimer(); self._fps_timer.start()
+        self._fps_ui_timer = QElapsedTimer(); self._fps_ui_timer.start()
 
         v.addWidget(self.view, alignment=Qt.AlignmentFlag.AlignCenter)
         v.addStretch()
@@ -56,12 +68,23 @@ class VisualizePage(QWidget):
         self._watchdog.timeout.connect(self._check_signal)
         self._watchdog.start()
 
-    @pyqtSlot(object, object, object, object)
-    def on_image(self, img, boxes=None, scores=None, cls_inds=None):
+    @pyqtSlot(object, object, object, object, float)
+    def on_image(self, img, boxes=None, scores=None, cls_inds=None, conf=None):
         """
         img: numpy ndarray (H,W,3|4, BGR/BGRA) 或 QImage
         """
         self._last_update = QDateTime.currentDateTimeUtc()
+
+        dt = self._fps_timer.restart() / 1000.0  # 秒
+        if dt > 0:
+            alpha = 1.0 - math.exp(-dt / self._fps_tau)      # 依 dt 自適應平滑係數
+            self._dt_ema = dt if self._dt_ema is None else (1-alpha)*self._dt_ema + alpha*dt
+            self._fps = 1.0 / self._dt_ema
+
+        # 只在每 250ms 更新一次文字，避免數字抖動
+        if self._fps_ui_timer.elapsed() >= 250:
+            self._fps_text = f"FPS: {self._fps:.1f}"
+            self._fps_ui_timer.restart()
         try:
             if isinstance(img, QImage):
                 qimg = img
@@ -85,12 +108,31 @@ class VisualizePage(QWidget):
                 
             # 這裡畫框與標籤
             if boxes is not None and len(boxes):
-                self._draw_dets(qimg, boxes, scores, cls_inds)
+                self._draw_dets(qimg, boxes, scores, cls_inds, conf)
         except Exception as e:
                 self.on_exception.emit(type(e), e)
                 return
 
         self._pix = QPixmap.fromImage(qimg)
+        # 在 pixmap 上顯示 FPS（繪製於右上角）
+        try:
+            painter = QPainter(self._pix)
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            font = QFont("Inter", 12); painter.setFont(font)
+            fm = QFontMetrics(font)
+            txt = self._fps_text
+            self.osd_fps.emit(txt)
+            x = max(8, self._pix.width() - fm.horizontalAdvance(txt) - 8)
+            y = fm.ascent() + 8
+            rect_w = fm.horizontalAdvance(txt) + 8
+            rect_h = fm.height() + 4
+            painter.fillRect(x - 4, y - fm.ascent() - 2, rect_w, rect_h, QColor(0, 0, 0, 120))
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawText(x, y, txt)
+            painter.end()
+        except Exception:
+            # 若繪製 FPS 有問題，不要阻斷主流程
+            pass
         self._render_pix()
 
     def resizeEvent(self, e):
@@ -118,10 +160,10 @@ class VisualizePage(QWidget):
             self.view.setText("No signal")
             self.view.setPixmap(QPixmap())
 
-    def _draw_dets(self, qimg: QImage, boxes, scores=None, cls_inds=None):
+    def _draw_dets(self, qimg: QImage, boxes, scores=None, cls_inds=None, conf=0.5):
         # 取閾值與標籤（可選）
-        conf_thr = getattr(getattr(self, "args", None), "conf", 0.4) if hasattr(self, "args") else 0.0
-        labels = getattr(getattr(self, "args", None), "label_list", [])
+        conf_thr = conf
+        labels = []
 
         p = QPainter(qimg)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)

@@ -33,12 +33,13 @@ class _DetailDialog(QDialog):
         self.resize(720, 420)
         lay = QVBoxLayout(self); lay.setContentsMargins(10,10,10,10); lay.setSpacing(8)
         edit = QPlainTextEdit(self)
-        edit.setStyleSheet("font-family: 'Inter'; font-size: 14px;")
+        edit.setStyleSheet("font-family: 'Inter'; font-size: 14px; color: white")
         edit.setReadOnly(True)
         edit.setPlainText(details)
         lay.addWidget(edit)
         btns = QHBoxLayout(); btns.addStretch(1)
         ok = QPushButton("Close"); ok.clicked.connect(self.accept)
+        ok.setStyleSheet("font-family: 'Inter'; color: white")
         btns.addWidget(ok)
         lay.addLayout(btns)
 
@@ -126,7 +127,9 @@ class Toast(QWidget):
             return
         if allow_multiple and self.isVisible():
             twin = Toast(self.parent())
-            twin.fatalTriggered.connect(self.fatalTriggered)  # 轉發
+            twin.fatalTriggered.connect(self.fatalTriggered) # 轉發
+            if py:
+                py -= self.height()
             return twin.show_notice(level, title, message, ms, px, py, traceback, allow_multiple=False)
 
         colors = {"info": "#38c942", "warn": "#ffbd4a", "error": "#ff5c5c", "debug": "#11a4f3", "fatal": "#ff00ea"}
