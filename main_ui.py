@@ -28,7 +28,7 @@ class MainUI(QMainWindow):
         self.LOGGER.info("⏳Starting up...")
         self.setObjectName(self.__class__.__name__)
         self.setWindowTitle("手殘黨")
-        self.resize(16*75, 9*75)
+        self.resize(16*40, 9*40)
         self.setStyleSheet("background-color: #212121;")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
