@@ -1,7 +1,6 @@
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, 
-    QVBoxLayout, QWidget, QHBoxLayout, 
-    QStackedWidget, QLabel, QSplitter
+    QMainWindow, QWidget, QHBoxLayout, 
+    QStackedWidget
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QTimer
 import sys
@@ -22,13 +21,17 @@ from pprint import pformat
 class MainUI(QMainWindow):
     startRequested = pyqtSignal()
     stopRequested = pyqtSignal()
-    def __init__(self, level: str = "debug"):
+    def __init__(self, cfg_path: str, level: str = None):
         super().__init__()
-        self.LOGGER = loggerFactory(log_level=level, logger_name="MainUI").getLogger()
+        self.args = self._load_yaml(cfg_path)
+        self.cfg_path = cfg_path
+        if level:
+            self.args['log_level'] = level
+        self.LOGGER = loggerFactory(log_level=self.args['log_level'], logger_name="MainUI").getLogger()
         self.LOGGER.info("⏳Starting up...")
         self.setObjectName(self.__class__.__name__)
         self.setWindowTitle("手殘黨")
-        self.resize(16*40, 9*40)
+        self.resize(16*60, 9*60)
         self.setStyleSheet("background-color: #212121;")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
@@ -42,26 +45,29 @@ class MainUI(QMainWindow):
         self.toast = Toast(self)
         self.toast.fatalTriggered.connect(self._clear_all)
 
-        self.nav_bar = NavBar(self)
-        self.main_layout.addWidget(self.nav_bar)
-        
-        self.content_widget = QStackedWidget()
-        
-        self._add_pages()
+        try:
+            self.nav_bar = NavBar(self)
+            self.main_layout.addWidget(self.nav_bar)
+            
+            self.content_widget = QStackedWidget()
+            
+            self._add_pages(cfg_path)
 
-        self.main_layout.addWidget(self.content_widget)
+            self.main_layout.addWidget(self.content_widget)
 
-        self.nav_bar.tabChanged.connect(self.content_widget.setCurrentIndex)
+            self.nav_bar.tabChanged.connect(self.content_widget.setCurrentIndex)
 
-        self.setCentralWidget(self.central_widget)
+            self.setCentralWidget(self.central_widget)
 
-        self.nav_bar.set_disabled()
+            self.nav_bar.set_disabled()
 
+            self.LOGGER.debug("Starting up...()")
+            self._run_start_up()
+        except Exception as e:
+            pass
+            # self._on_exception(type(e), e)
 
-        self.LOGGER.debug("Starting up...()")
-        self._run_start_up()
-
-    def _add_pages(self):
+    def _add_pages(self, cfg_path):
         self.loading_page = LoadingPage()
         self.home_page = HomePage(self)
         self.visualize_page = VisualizePage(self)
@@ -75,6 +81,8 @@ class MainUI(QMainWindow):
                 page.on_exception.connect(self._on_exception)
         self.content_widget.setCurrentIndex(len(pages)-1)
         self.visualize_page.osd_fps.connect(self.osd._on_fps)
+        self.setting_page.build(self.args, cfg_path)
+        
         # self.content_widget.setCurrentIndex(0)
 
         self.home_page.startRequested.connect(self._start_aim_sys)
@@ -85,7 +93,7 @@ class MainUI(QMainWindow):
 
     def _run_start_up(self):
         self.loading_thread = QThread()
-        self.loading_worker = StartUp(self.LOGGER)
+        self.loading_worker = StartUp(self.LOGGER, self.args)
         self.loading_worker.moveToThread(self.loading_thread)
 
         self.loading_thread.started.connect(self.loading_worker.run_startup)
@@ -122,7 +130,7 @@ class MainUI(QMainWindow):
             # self.hide()
             return
         
-        self.aim_sys = Main(no_gui=False, level=self.LOGGER.level)
+        self.aim_sys = Main(no_gui=False, args=self.args)
         self._prepare_worker()
         
 
@@ -178,7 +186,8 @@ class MainUI(QMainWindow):
             del(self.aim_sys)
             self.aim_sys = None
             Main = _reload_main_class()
-            self.aim_sys = Main(no_gui=False, level=self.LOGGER.level)
+            self.args = self._load_yaml(self.cfg_path)
+            self.aim_sys = Main(no_gui=False, args=self.cfg_path)
             self._prepare_worker()
             self.home_page.set_restart_enabled(True)
             self.toast.show_notice(INFO, "Aim Sys Restarted", "Aim Sys restarted successfully.", 3000, px=self._get_x(), py=self._get_y())
@@ -212,9 +221,11 @@ class MainUI(QMainWindow):
         import traceback
         tb_text = "".join(traceback.TracebackException.from_exception(e).format())
         title ="App Crash Exception"
-        if isinstance(e, SerialPortNotFound):
+        print(type(e))
+        from serial.serialutil import SerialException
+        if isinstance(e, SerialException):
             title = "USB Device Not Found"
-            e = "USB Device Not Found. Please check your USB connection and settings."
+            
             from utils.mouse import usb_com_ports
             _, text = usb_com_ports()
             tb_text = f"{e}\n\nAvailable USB COM Ports:\n{text}\n\n{tb_text}"
@@ -227,6 +238,16 @@ class MainUI(QMainWindow):
     
     def _get_y(self):
         return self.pos().y()
+    
+    def _load_yaml(self, path: str) -> dict:
+        import yaml
+        if not os.path.exists(path):
+            #copy default
+            import shutil
+            shutil.copy("config/default.yaml", path)
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return data
 
 class StartUp(QObject):
 
@@ -236,9 +257,10 @@ class StartUp(QObject):
     finished = pyqtSignal()
     show_next_page = pyqtSignal(int)
 
-    def __init__(self, Logger: Logger):
+    def __init__(self, Logger: Logger, args: dict):
         super().__init__()
         self.logger = Logger
+        self.args = args
 
     @pyqtSlot()
     def run_startup(self):
@@ -257,12 +279,12 @@ class StartUp(QObject):
                     formatted_res = pformat(res, width=120, compact=False)
                 except Exception:
                     formatted_res = str(res)
-            self.logger.info("env check result:\n%s", formatted_res)
+            self.logger.debug("env check result:\n%s", formatted_res)
             value = 41
             self.emit_helper("init_AimSys", value, "Initializing system...")
 
             from main import Main
-            aim_sys = Main(no_gui=False, level="ERROR")
+            aim_sys = Main(no_gui=False, args=self.args)
             self.res.emit(aim_sys, "success")
             
             next_page = 0

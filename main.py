@@ -4,35 +4,39 @@ import time
 import dxcam
 import numpy as np
 from simple_pid import PID
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from utils.logger import loggerFactory, C
 from utils.mouse import USBMouse
 from inference import BaseEngine
-from ui import SerialPortNotFound
 from pynput.mouse import Button, Listener
 from pynput import keyboard as KB
-from math import atan2
-from serial.serialutil import PortNotOpenError
+# from math import atan2
+from serial.serialutil import PortNotOpenError, SerialException
 
 class Main(QObject):
-    image_queue = pyqtSignal(object, object, object, object, float)  # img, boxes, scores, cls_inds
+    image_queue = pyqtSignal(object, object, object, object)  # img, boxes, scores, cls_inds
     on_exception = pyqtSignal(type, Exception)
     finished = pyqtSignal()
     on_trigger = pyqtSignal(bool)
     # TODO 重新 改動 cfg
-    def __init__(self, no_gui: bool = True, level: str = None):
+    def __init__(self, args: dict | str, no_gui: bool = True):
         self.running = False
-        self.args = self.load_yaml("config/config.yaml")
-        debug = self.args.get("debug", False)
 
-        log_level = self.args.get("log_level", "WARNING")
-        if debug:
+        if not isinstance(args, dict) and not isinstance(args, str):
+            raise TypeError("Config most be dict or str")
+        if isinstance(args, dict):
+            self.args = args
+
+        if isinstance(args, str):
+            self.args = self.load_yaml(path=args)
+
+        if (l := self.args.get('log_level', None)) is not None:
+            log_level =  l
+
+        if self.args['debug']:
             log_level = "DEBUG"
-        if level != None:
-            log_level = level
 
         self.LOGGER = loggerFactory(log_level=log_level, logger_name="AimSys").getLogger()
-
 
         self.no_gui = no_gui
 
@@ -67,6 +71,10 @@ class Main(QObject):
    ###   #   #### #        #   #    ########    ###   ##     # #   #    ######## #        ##     # ###   ###
 ######## ######## ######## ######## ######## ######## ######## ######## ######## ######## ######## #########
                            ---------------------Sucsessful---------------------{C['r']}""")
+        except SerialException as SE:
+            # se = SerialPortNotFound(cause=SE)
+            if not self.no_gui:
+                self.on_exception.emit(type(SE), SE)
         except Exception as e:
             self.LOGGER.critical(f"Error initializing all components: {e}")
             if not self.no_gui:
@@ -127,13 +135,10 @@ class Main(QObject):
     def init_mouse(self):
         serial_port = self.args.get("mouse", None).get("serial_port", None)
 
-        try:
-            if serial_port is None:
-                raise ValueError("Serial port not specified in configuration.")
-            self.m = USBMouse(serial_port)
-            self.LOGGER.debug(f"Mouse initialized on port {serial_port}.")
-        except Exception as e:
-            raise SerialPortNotFound(f"Failed to initialize USBMouse on port {serial_port}: {e}")
+        if serial_port is None:
+            raise ValueError("Serial port not specified in configuration.")
+        self.m = USBMouse(serial_port)
+        self.LOGGER.debug(f"Mouse initialized on port {serial_port}.")
         
     def init_engine(self):
         path = self.args.get("model").get("file_path")
@@ -293,9 +298,9 @@ class Main(QObject):
             #     self.slient(T)
 
             if not self.no_gui:
-                self.image_queue.emit(img, boxes, confidences, classes, self.conf)
+                self.image_queue.emit(img, boxes, confidences, classes,)
         else:
-            self.image_queue.emit(img, None, None, None, self.conf)
+            self.image_queue.emit(img, None, None, None,)
 
     @pyqtSlot()
     def start(self):

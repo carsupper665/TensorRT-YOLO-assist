@@ -8,8 +8,3 @@ class UnexpectedError(Exception):
     def __init__(self, message="An unexpected error occurred. Please try reinstalling the application or contact support if the issue persists."):
         self.message = message
         super().__init__(self.message)
-
-class SerialPortNotFound(Exception):
-    def __init__(self, message="Specified serial port not found. Please check your connection and try again."):
-        self.message = message
-        super().__init__(self.message)

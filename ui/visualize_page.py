@@ -1,19 +1,12 @@
 #ui/visualize_page.py
 # import numpy as np
 from PyQt6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
-    QToolButton,
     QWidget,
-    QStackedLayout,
     QVBoxLayout,
-    QProgressBar,
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime, pyqtSlot, pyqtSignal, QRect, QElapsedTimer
-import time
-from collections import deque
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QFontMetrics
-import cv2
 import math
 
 class VisualizePage(QWidget):
@@ -26,6 +19,8 @@ class VisualizePage(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(12)
         # v.addStretch()
+
+        self.parent = parent
 
         self.label = QLabel("Visualize", self)
         self.label.setWordWrap(True)
@@ -68,7 +63,7 @@ class VisualizePage(QWidget):
         self._watchdog.timeout.connect(self._check_signal)
         self._watchdog.start()
 
-    @pyqtSlot(object, object, object, object, float)
+    @pyqtSlot(object, object, object, object)
     def on_image(self, img, boxes=None, scores=None, cls_inds=None, conf=None):
         """
         img: numpy ndarray (H,W,3|4, BGR/BGRA) 或 QImage
@@ -108,7 +103,7 @@ class VisualizePage(QWidget):
                 
             # 這裡畫框與標籤
             if boxes is not None and len(boxes):
-                self._draw_dets(qimg, boxes, scores, cls_inds, conf)
+                self._draw_dets(qimg, boxes, scores, cls_inds)
         except Exception as e:
                 self.on_exception.emit(type(e), e)
                 return
@@ -162,7 +157,8 @@ class VisualizePage(QWidget):
 
     def _draw_dets(self, qimg: QImage, boxes, scores=None, cls_inds=None, conf=0.5):
         # 取閾值與標籤（可選）
-        conf_thr = conf
+        
+        conf_thr = self.parent.args['model']['conf']
         labels = []
 
         p = QPainter(qimg)

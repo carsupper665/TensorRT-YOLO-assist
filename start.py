@@ -7,7 +7,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-gui", action="store_true", help="Run without GUI")
     parser.add_argument("--trt_path", type=str, default="", help=r"Path to TensorRT (usally call C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\vX.X\\lib\\x64)")
     parser.add_argument("--trt_ver", type=str, default="", help=r"TensorRT Ver")
-    parser.add_argument("--log", type=str, default="ERROR", help="log level")
+    parser.add_argument("--log", type=str, default=None, help="log level")
+    parser.add_argument("--cfg", type=str, default="./config/config.yaml", help="config path")
     args = parser.parse_args()
 
     if args.trt_ver or args.trt_path:
@@ -38,7 +39,7 @@ if __name__ == "__main__":
         import sys
 
         app = QApplication(sys.argv)
-        window = MainUI(args.log)
+        window = MainUI(level=args.log, cfg_path=args.cfg)
         window.show()
         # window._clear_all()
         sys.exit(app.exec())

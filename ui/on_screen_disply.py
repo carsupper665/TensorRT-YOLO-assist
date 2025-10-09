@@ -1,5 +1,5 @@
-from PyQt6.QtCore import Qt, QTimer, QElapsedTimer, QCoreApplication, pyqtSignal, pyqtSlot
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar, QPushButton, QDialog, QHBoxLayout, QPlainTextEdit
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 from PyQt6.QtGui import QMouseEvent
 
 _BASE_STYLE = """

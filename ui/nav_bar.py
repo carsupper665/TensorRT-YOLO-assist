@@ -2,12 +2,11 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QToolButton,
-    QLabel,
     QSizePolicy,
     QSpacerItem,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QFont, QPalette
+from PyQt6.QtGui import QIcon, QFont
 class NavBar(QWidget):
     tabChanged = pyqtSignal(int)  # 自定義信號，發出選中的tab索引
 

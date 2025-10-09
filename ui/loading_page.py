@@ -1,15 +1,11 @@
 #ui/loading_page.py
 from PyQt6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
-    QToolButton,
     QWidget,
-    QStackedLayout,
     QVBoxLayout,
     QProgressBar,
 )
-from PyQt6.QtGui import QPalette, QIcon, QFont, QFontDatabase
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSlot, pyqtSignal
+from PyQt6.QtCore import Qt,pyqtSlot, pyqtSignal
 
 class LoadingPage(QWidget):
     on_exception = pyqtSignal(type, object)
