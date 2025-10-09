@@ -367,7 +367,7 @@ class StartUp(QObject):
         progress_value 最後為40
         """
         targets = [
-            "serial", "yaml", "numpy", "cv2", "argparse", "tkinter", "time",
+            "serial", "yaml", "numpy", "cv2", "argparse", "time",
             "threading", "multiprocessing", "mss", "pynput.mouse", "pynput.keyboard",
             "simple_pid", "cuda", "tensorrt", "ctypes", "torch",
         ]
