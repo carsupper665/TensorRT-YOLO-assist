@@ -10,3 +10,4 @@ config_bk.yaml
 *.spec
 build/
 dist/
+*.bat

@@ -313,7 +313,7 @@ class Main(QObject):
         try:
 
             if self.cam_type == "dxcam":
-                self.cam.start(region=self.box, target_fps=144)
+                self.cam.start(region=self.box, target_fps=240)
                 time.sleep(0.3) # warmup
                 if not self.cam.is_capturing:
                     raise RuntimeError("Camera failed to start capturing.")

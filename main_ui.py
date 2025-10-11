@@ -271,6 +271,11 @@ class StartUp(QObject):
             self.emit_helper("env_check", value, "Checking system environment...")
             time.sleep(2)
             res = self.env_check(value)
+
+            #raise Here
+            if (missing := res.get('missing', None)) is not None: 
+                raise ModuleNotFoundError(f"Missing modules: {', '.join(missing)}")
+            
             # 格式化 env_check 的回傳結果，優先用 JSON（多行），若含不可序列化物件則退到 pformat
             try:
                 formatted_res = json.dumps(res, indent=2, ensure_ascii=False)
@@ -295,7 +300,7 @@ class StartUp(QObject):
             self.logger.info("Try to install missing modules and restart the application.")
             self.emit_helper("install_package", value, str(me) +"\nInstalling missing packages...")
             try:
-                self._fully_install(value)
+                self._fully_install(value, res)
                 value = 95
                 self.res.emit(None, "install_package_end")
             except Exception as e:
@@ -314,7 +319,7 @@ class StartUp(QObject):
     def emit_helper(self, id: str, value: int, status: str):
         self.progress.emit({"signalId": id, "value": value, "status": status})
 
-    def _fully_install(self, progress_value: int):
+    def _fully_install(self, progress_value: int, package_data: dict):
         import subprocess
         import sys
         p = progress_value
@@ -323,19 +328,21 @@ class StartUp(QObject):
         subprocess.check_call([sys.executable, "-s", "-m", "pip", "install", "--upgrade", "setuptools", "wheel", "pip"])
         p += 15
         self.emit_helper("install_package", p, "Installing PyTorch, It may take a while\n Depending on your network speed...")
-        subprocess.check_call([sys.executable, "-s", "-m", "pip", "install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cu126"])
+        if package_data['modules']['torch']['err'] != '' or (not package_data['modules']['torch']['ok']):
+            subprocess.check_call([sys.executable, "-s", "-m", "pip", "install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cu126"])
         p += 20
         self.emit_helper("install_package", p, "Installing Packages from requirements.txt")
         subprocess.check_call([sys.executable, "-s", "-m", "pip", "install", "-r", "./requirements.txt"])
         p += 15
         self.emit_helper("install_package", p, "Searching for tensorrt wheel...")
-        wheel = pick_wheel(r".\packages")
-        if not wheel:
-            raise TensorRTWheelNotFound()
-        p += 5
-        self.emit_helper("install_package", p, f"Installing {wheel.name} ...")
-        subprocess.check_call([sys.executable, "-s", "-m", "pip", "install", "--upgrade", str(wheel)])
+        if package_data['modules']['tensorrt']['err'] != '' or (not package_data['modules']['tensorrt']['ok']):
 
+            wheel = pick_wheel(r".\packages")
+            if not wheel:
+                raise TensorRTWheelNotFound()
+            self.emit_helper("install_package", p, f"Installing {wheel.name} ...")
+            subprocess.check_call([sys.executable, "-s", "-m", "pip", "install", "--upgrade", str(wheel)])
+        p += 5
 
     def _probe(self, mod: str) -> tuple[bool, str | None, object | None]:
         import importlib
@@ -424,8 +431,8 @@ class StartUp(QObject):
         missing = [k for k, v in result["modules"].items() if not v["ok"]]
         if missing:
             self.logger.error(f"Missing modules: {', '.join(missing)}")
-            raise ModuleNotFoundError(f"Missing modules: {', '.join(missing)}")
-        
+            result['missing'] = missing
+            return result        
         #檢查models/500e.trt 是否存在
         model_path = Path("models/500e.trt")
         if not model_path.exists():

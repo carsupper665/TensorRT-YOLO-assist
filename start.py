@@ -5,8 +5,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # e.x python.exe start.py --trt_ver 'v12.6' --log 'info'
     parser.add_argument("--no-gui", action="store_true", help="Run without GUI")
-    parser.add_argument("--trt_path", type=str, default="", help=r"Path to TensorRT (usally call C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\vX.X\\lib\\x64)")
-    parser.add_argument("--trt_ver", type=str, default="", help=r"TensorRT Ver")
+    parser.add_argument("--trt_path", type=str, default=None, help=r"Path to TensorRT (usally call C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\vX.X\\lib\\x64)")
+    parser.add_argument("--trt_ver", type=str, default=None, help=r"TensorRT Ver")
     parser.add_argument("--log", type=str, default=None, help="log level")
     parser.add_argument("--cfg", type=str, default="./config/config.yaml", help="config path")
     args = parser.parse_args()
