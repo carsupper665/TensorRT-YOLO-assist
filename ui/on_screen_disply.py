@@ -4,8 +4,8 @@ from PyQt6.QtGui import QMouseEvent
 
 _BASE_STYLE = """
 QWidget { background-color: rgba(34, 34, 34, 180); border:1px solid #444; border-radius:8px; }
-QLabel#title { color:#fff; font-weight:600; font-family: "Inter"; font-size:22px; }
-QLabel#msg { color:#ddd; font-family: "Inter"; font-size:18px; }
+QLabel#title { color:#fff; font-weight:600; font-family: "Source Han Sans TC"; font-size:22px; }
+QLabel#msg { color:#ddd; font-family: "Source Han Sans TC"; font-size:18px; }
 
 QPushButton#ok {
     background:rgba(34, 34, 34, 180); color:%(accent)s; border:1px solid %(accent)s;

@@ -7,8 +7,8 @@ import time
 
 _BASE_STYLE = """
 QWidget { background:#222; border:1px solid #444; border-radius:8px; }
-QLabel#title { color:#fff; font-weight:600; font-family: "Inter"; font-size:16px; }
-QLabel#msg { color:#ddd; font-family: "Inter"; font-size:14px; }
+QLabel#title { color:#fff; font-weight:600; font-family: "Source Han Sans TC"; font-size:16px; }
+QLabel#msg { color:#ddd; font-family: "Source Han Sans TC"; font-size:14px; }
 QProgressBar {
     background:#2a2a2a; border:1px solid #444; border-radius:4px; height:6px;
 }

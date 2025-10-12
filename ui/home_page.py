@@ -24,7 +24,7 @@ class HomePage(QWidget):
         title.setStyleSheet(
             """
             background-color: none;
-            font-family: "Inter", "Segoe UI", sans-serif;
+            font-family: "Source Han Sans TC", sans-serif;
             font-weight: 500;
             font-size: 20px;
             color: #FFFFFF;

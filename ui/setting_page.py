@@ -10,7 +10,7 @@ from .threads import YamlWriter as _YamlWriter
 
 _TEXT_STYLE = """
 background-color: none;
-font-family: "Inter", "Segoe UI", sans-serif;
+font-family: "Source Han Sans TC", sans-serif;
 font-weight: 80;
 font-size: 14px;
 color: #FFFFFF;

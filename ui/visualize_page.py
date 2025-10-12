@@ -167,7 +167,7 @@ class VisualizePage(QWidget):
         W, H = qimg.width(), qimg.height()
         cols = [(255,99,132),(54,162,235),(255,206,86),(75,192,192),(153,102,255),(255,159,64)]
         thickness = max(2, int(min(W, H) * 0.003))
-        font = QFont("Inter", 10)
+        font = QFont("Source Han Sans TC", 10)
 
         n = len(boxes)
         for i in range(n):

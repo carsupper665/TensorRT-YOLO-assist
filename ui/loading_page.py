@@ -23,7 +23,7 @@ class LoadingPage(QWidget):
         self.label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.label.setStyleSheet("""
                 background-color: none;
-                font-family: "Inter";
+                font-family: "Source Han Sans TC";
                 font-style: normal;
                 font-weight: 500;
                 font-size: 20px;

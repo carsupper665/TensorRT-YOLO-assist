@@ -30,7 +30,7 @@ class NavBar(QWidget):
                     border-radius: 4px;
                     padding: 4px 6px;
                     margin: 0px;
-                    font-family: "Inter";
+                    font-family: "Source Han Sans TC";
                     font-size: 11px;
                     font-weight: normal;
                     white-space: nowrap;
@@ -62,7 +62,7 @@ class NavBar(QWidget):
         btn.setText(text)
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         btn.setFixedHeight(56)
-        btn.setFont(QFont("Inter", 10))
+        btn.setFont(QFont("Source Han Sans TC", 10))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setCheckable(True)
         btn.page_index = page_index
@@ -114,7 +114,7 @@ QToolButton:hover {
         btn.setText(text)
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         btn.setFixedHeight(56)
-        btn.setFont(QFont("Inter", 10))
+        btn.setFont(QFont("Source Han Sans TC", 10))
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setCheckable(False)  # Action buttons are not checkable
         btn.page_index = -1
