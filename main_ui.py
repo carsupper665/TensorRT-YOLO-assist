@@ -376,7 +376,7 @@ class StartUp(QObject):
         targets = [
             "serial", "yaml", "numpy", "cv2", "argparse", "time",
             "threading", "multiprocessing", "mss", "pynput.mouse", "pynput.keyboard",
-            "simple_pid", "cuda", "tensorrt", "ctypes", "torch",
+            "simple_pid", "cuda.cudart", "tensorrt", "ctypes", "torch",
         ]
 
         result = {"ok": True, "modules": {}, "gpu": {}}
