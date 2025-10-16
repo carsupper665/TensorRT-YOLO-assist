@@ -8,6 +8,7 @@ mouse:
   aimbot_button: left
   switch_button: x2
   silent_button: alt_gr
+  silent_aim: caps_lock
 
   max_lock_dis: 100
   max_step_dis: 30

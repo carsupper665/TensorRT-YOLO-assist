@@ -152,12 +152,12 @@ class Main(QObject):
 
         self.toggle_aim = self.args['mouse']['switch_button']
         self.toggle_aiming = self.args['mouse']['aimbot_button']
-        self.toggle_silent = self.args['mouse']['slient_button']
-        self.slient_aim_btn = self.args['mouse']['slient_aim']
+        self.toggle_silent = self.args['mouse']['silent_button']
+        self.silent_aim_btn = self.args['mouse']['silent_aim']
         self.aim            = False
         self.aiming         = False
-        self.slient_aim     = False
-        self.slient_aiming  = False
+        self.silent_aim     = False
+        self.silent_aiming  = False
 
         self.LOGGER.debug("Input listeners initialized.")
 
@@ -165,12 +165,12 @@ class Main(QObject):
         k = f"{key}"
         self.LOGGER.debug(f"Key released: {key}")
         # if key == getattr(KB.Key, self.toggle_silent):
-        #     self.slient_aim = not self.slient_aim
-        #     self.LOGGER.info(f"slient aim {'ON' if self.slient_aim else 'OFF'}")
+        #     self.silent_aim = not self.silent_aim
+        #     self.LOGGER.info(f"silent aim {'ON' if self.silent_aim else 'OFF'}")
 
-        # if k == "Key." + self.slient_aim_btn or k == self.slient_aim_btn:
-        #     self.slient_aiming = not self.slient_aiming
-        #     self.LOGGER.info(f"slient Shoot {'ON' if self.slient_aiming else 'OFF'}")
+        # if k == "Key." + self.silent_aim_btn or k == self.silent_aim_btn:
+        #     self.silent_aiming = not self.silent_aiming
+        #     self.LOGGER.info(f"silent Shoot {'ON' if self.silent_aiming else 'OFF'}")
 
         if k in self.down:
             self.down.remove(k)
@@ -180,9 +180,9 @@ class Main(QObject):
         if k in self.down:
             return          # 忽略重複 press
         self.down.add(f"{k}")
-        # if k == "Key." + self.slient_aim_btn or k == self.slient_aim_btn:
-        #     self.slient_aiming = not self.slient_aiming
-        #     self.LOGGER.info(f"slient Shoot {'ON' if self.slient_aiming else 'OFF'}")
+        # if k == "Key." + self.silent_aim_btn or k == self.silent_aim_btn:
+        #     self.silent_aiming = not self.silent_aiming
+        #     self.LOGGER.info(f"silent Shoot {'ON' if self.silent_aiming else 'OFF'}")
         self.LOGGER.debug(f"Key pressed: {key}")
 
     def on_click(self, x, y, button, pressed):
@@ -271,8 +271,8 @@ class Main(QObject):
 
         self.pidx(0); self.pidy(0)
 
-    def slient(self, T):
-        if T is None or not self.slient_aiming:
+    def silent(self, T):
+        if T is None or not self.silent_aiming:
             return
         
         rel_x = (T[0] - self.detect_center_x)
@@ -281,21 +281,21 @@ class Main(QObject):
     
     def forward(self, ):
         is_aim = self.aim
-        is_slient = self.slient_aim
+        is_silent = self.silent_aim
         img = self.grab_screen()
 
         if img is None:
             self.LOGGER.warning("No frame captured from camera.")
             return
         
-        if is_aim or is_slient:
+        if is_aim or is_silent:
             boxes, confidences, classes = self.engine.forward(img)
             T = self.target_list(boxes, confidences, classes)
             if is_aim:
                 self.lock_target(T)
 
-            # if is_slient:
-            #     self.slient(T)
+            # if is_silent:
+            #     self.silent(T)
 
             if not self.no_gui:
                 self.image_queue.emit(img, boxes, confidences, classes,)
