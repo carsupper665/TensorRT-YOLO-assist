@@ -152,6 +152,7 @@ class MainUI(QMainWindow):
         self.aim_sys.image_queue.connect(self.visualize_page.on_image, type=Qt.ConnectionType.QueuedConnection)
         self.aim_sys.finished.connect(self.work_thread.quit)
         self.aim_sys.finished.connect(lambda: self.home_page.set_running(False))
+        self.aim_sys.finished.connect(lambda: self.osd.hide())
         self.aim_sys.on_trigger.connect(self.osd.on_trigger)
 
         self.aim_sys.init_all()
@@ -173,8 +174,8 @@ class MainUI(QMainWindow):
         if self.work_thread and self.work_thread.isRunning():
             self.work_thread.quit()
             self.work_thread.wait()
+            # self.work_thread.deleteLater()
         self.home_page.set_running(False)
-        self.osd.hide()
         self.toast.show_notice(INFO, "系統停止", "AI輔助瞄準系統已停止。", 3000, px=self._get_x(), py=self._get_y())
 
     @pyqtSlot()

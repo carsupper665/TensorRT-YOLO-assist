@@ -1,8 +1,10 @@
-#./main.py
+#./main.py 你好ㄎㄎㄎ
 import os
 import time
 import dxcam
 import numpy as np
+import threading, queue
+from typing import Tuple
 from simple_pid import PID
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from utils.logger import loggerFactory, C
@@ -10,8 +12,80 @@ from utils.mouse import USBMouse
 from inference import BaseEngine
 from pynput.mouse import Button, Listener
 from pynput import keyboard as KB
-# from math import atan2
+
+import ctypes
+from dxcam.dxcam import INFINITE, WAIT_FAILED
 from serial.serialutil import PortNotOpenError, SerialException
+from dxcam.util.timer import create_high_resolution_timer, set_periodic_timer, wait_for_timer, cancel_timer
+
+def fixed_cap(
+        self, region: Tuple[int, int, int, int], target_fps: int = 60, video_mode=False
+    ):
+        if target_fps != 0:
+            period_ms = 1000 // target_fps  # millisenonds for periodic timer
+            self.__timer_handle = create_high_resolution_timer()
+            set_periodic_timer(self.__timer_handle, period_ms)
+
+        self.__capture_start_time = time.perf_counter()
+
+        capture_error = None
+
+        while not self._DXCamera__stop_capture.is_set():
+            if self._DXCamera__timer_handle:
+                res = wait_for_timer(self.__timer_handle, INFINITE)
+                if res == WAIT_FAILED:
+                    self.__stop_capture.set()
+                    capture_error = ctypes.WinError()
+                    continue
+            try:
+                frame = self._grab(region)
+                if frame is not None:
+                    with self._DXCamera__lock:
+                        self._DXCamera__frame_buffer[self._DXCamera__head] = frame
+                        if self._DXCamera__full:
+                            self._DXCamera__tail = (self._DXCamera__tail + 1) % self.max_buffer_len
+                        self._DXCamera__head = (self._DXCamera__head + 1) % self.max_buffer_len
+                        self._DXCamera__frame_available.set()
+                        self._DXCamera__frame_count += 1
+                        self._DXCamera__full = self._DXCamera__head == self._DXCamera__tail
+                elif video_mode:
+                    with self.__lock:
+                        self._DXCamera__frame_buffer[self._DXCamera__head] = np.array(
+                            self._DXCamera__frame_buffer[(self._DXCamera__head - 1) % self.max_buffer_len]
+                        )
+                        if self._DXCamera__full:
+                            self._DXCamera__tail = (self._DXCamera__tail + 1) % self.max_buffer_len
+                        self._DXCamera__head = (self._DXCamera__head + 1) % self.max_buffer_len
+                        self._DXCamera__frame_available.set()
+                        self._DXCamera__frame_count += 1
+                        self._DXCamera__full = self._DXCamera__head == self._DXCamera__tail
+            except Exception as e:
+                import traceback
+
+                print(traceback.format_exc())
+                self._DXCamera__stop_capture.set()
+                capture_error = e
+                continue
+        if self._DXCamera__timer_handle:
+            cancel_timer(self._DXCamera__timer_handle)
+            self._DXCamera__timer_handle = None
+        if capture_error is not None:
+            # _safe_stop
+            if self.is_capturing:
+                self._DXCamera__frame_available.set()
+                self._DXCamera__stop_capture.set()
+                t = getattr(self, "_DXCamera__thread", None)
+                if t is not None and threading.current_thread() is not t:
+                    t.join(timeout=10)
+            self.is_capturing = False
+            self._DXCamera__frame_buffer = None
+            self._DXCamera__frame_count = 0
+            self._DXCamera__frame_available.clear()
+            self._DXCamera__stop_capture.clear()
+            raise capture_error
+        print(
+            f"Screen Capture FPS: {int(self._DXCamera__frame_count/(time.perf_counter() - self.__capture_start_time))}"
+        )
 
 class Main(QObject):
     image_queue = pyqtSignal(object, object, object, object)  # img, boxes, scores, cls_inds
@@ -90,6 +164,13 @@ class Main(QObject):
             data = yaml.safe_load(f)
         return data
     
+    def _rework_dxc(self):
+        DXC = dxcam
+        org_cap = DXC.DXCamera._DXCamera__capture
+        DXC.DXCamera._DXCamera__capture = fixed_cap
+        self.cam = DXC.create(output_idx=0, output_color="BGRA")
+        self.grab_screen = self._dx_grab_screen
+    
     def init_camera(self):
         self.cam_type = self.args.get("camera", "dxcam")
         self.screen_width, self.screen_height = self.args.get("resolution_x", None), self.args.get("resolution_y", None)
@@ -99,8 +180,7 @@ class Main(QObject):
         self.box = (left, top, left + self.detect_length, top + self.detect_length)
 
         if self.cam_type == "dxcam":
-            self.cam = dxcam.create(output_idx=0, output_color="BGRA")
-            self.grab_screen = self._dx_grab_screen
+            self._rework_dxc()
         else:
             self.grab_screen = self._mss_grab_screen 
 
@@ -108,6 +188,7 @@ class Main(QObject):
         
 
     def init_parms(self):
+        self._on_dxcam_reinit = False
         self.smooth = self.args.get("mouse", None).get("smooth", None) * 1920 / self.args.get("resolution_x", None)
         self.scale = self.args.get("resolution_x", None) / 1920
         for key, _ in self.args.items():
@@ -119,6 +200,7 @@ class Main(QObject):
         pidy_kp = self.args.get("mouse", None).get("pidy_kp", None)
         pidy_kd = self.args.get("mouse", None).get("pidy_kd", None)
         pidy_ki = self.args.get("mouse", None).get("pidy_ki", None)
+        self.mms = 1/self.args['mouse']['mag']
         self.pidx = PID(pidx_kp, pidx_kd, pidx_ki, setpoint=0, sample_time=0.001,)
         self.pidy = PID(pidy_kp, pidy_kd, pidy_ki, setpoint=0, sample_time=0.001,)
         self.pidx(0),self.pidy(0)
@@ -259,7 +341,7 @@ class Main(QObject):
             # rel_y = self.pidy(atan2(-rel_y, self.detect_length))
         return rel_x, rel_y
     
-    def lock_target(self, T, s=0.7):
+    def lock_target(self, T, s=0.5):
         if T is None or not self.aiming:
             self.pidx(0); self.pidy(0)
             return
@@ -292,7 +374,7 @@ class Main(QObject):
             boxes, confidences, classes = self.engine.forward(img)
             T = self.target_list(boxes, confidences, classes)
             if is_aim:
-                self.lock_target(T)
+                self.lock_target(T, self.mms)
 
             # if is_silent:
             #     self.silent(T)
@@ -313,6 +395,18 @@ class Main(QObject):
         try:
 
             if self.cam_type == "dxcam":
+                if self._on_dxcam_reinit:
+                    import gc
+                    self.LOGGER.warning(f"Rebuild DXC")
+                    self.cam.stop()
+                    self.cam.release()
+                    self.cam.__del__()
+                    del self.cam
+                    gc.collect()
+                    # self.cam = None
+                    self._rework_dxc()
+                    self._on_dxcam_reinit = False
+
                 self.cam.start(region=self.box, target_fps=240)
                 time.sleep(0.3) # warmup
                 if not self.cam.is_capturing:
@@ -344,7 +438,11 @@ class Main(QObject):
            
             while self.running:
                 self.forward()
-                
+        except TypeError as te:
+            if str(te) == "'NoneType' object is not subscriptable":
+                self.LOGGER.error(f'TypeError: {te}')
+            self.LOGGER.warning(f'Sys Auto Stop.')
+            self._on_dxcam_reinit = True
         except Exception as e:
             self.LOGGER.error(f"Error occurred: {e}")
             if not self.no_gui:
@@ -356,6 +454,7 @@ class Main(QObject):
 
             if self.cam_type == "dxcam":
                 self.cam.stop()
+                # self.cam.release()
 
             self.kb_Listener.stop()
             self.listener.stop()
