@@ -13,7 +13,6 @@ onnxruntime
 onnxsim
 PyYAML
 matplotlib
-nvidia-pyindex
 
 PyQt6
 packaging
