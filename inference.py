@@ -5,12 +5,13 @@ import cv2
 
 from utils import common
 
+
 class BaseEngine(object):
     def __init__(self, engine_path):
         self.mean = None
         self.std = None
         self.n_classes = 3
-        self.class_names = ['enm', 'down', 'friend']
+        self.class_names = ["enm", "down", "friend"]
 
         logger = trt.Logger(trt.Logger.ERROR)
         trt.init_libnvinfer_plugins(logger, "")
@@ -36,11 +37,20 @@ class BaseEngine(object):
             # 動態輸入則設定實際形狀（例如 1x3x640x640）
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
                 if any(d < 0 for d in shape):  # 動態
-                    if len(shape) == 4:   # NCHW
-                        shape = [1, shape[1] if shape[1] > 0 else 3, self.imgsz[0], self.imgsz[1]]
+                    if len(shape) == 4:  # NCHW
+                        shape = [
+                            1,
+                            shape[1] if shape[1] > 0 else 3,
+                            self.imgsz[0],
+                            self.imgsz[1],
+                        ]
                         self.context.set_input_shape(name, tuple(shape))
-                    elif len(shape) == 3: # CHW
-                        shape = [shape[0] if shape[0] > 0 else 3, self.imgsz[0], self.imgsz[1]]
+                    elif len(shape) == 3:  # CHW
+                        shape = [
+                            shape[0] if shape[0] > 0 else 3,
+                            self.imgsz[0],
+                            self.imgsz[1],
+                        ]
                         self.context.set_input_shape(name, tuple(shape))
 
             nbytes = dtype.itemsize
@@ -50,8 +60,14 @@ class BaseEngine(object):
             d_ptr = common.cuda_call(cudart.cudaMalloc(nbytes))
             self.allocations.append(d_ptr)
 
-            b = {"index": i, "name": name, "dtype": dtype, "shape": shape,
-                 "allocation": d_ptr, "size": nbytes}
+            b = {
+                "index": i,
+                "name": name,
+                "dtype": dtype,
+                "shape": shape,
+                "allocation": d_ptr,
+                "size": nbytes,
+            }
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
                 self.inputs.append(b)
             else:
@@ -64,7 +80,7 @@ class BaseEngine(object):
         self.stream = cudart.cudaStreamCreate()[1]
 
         # v3：把每個 tensor 綁定到位址（僅需做一次）
-        for b in (self.inputs + self.outputs):
+        for b in self.inputs + self.outputs:
             self.context.set_tensor_address(b["name"], int(b["allocation"]))
 
     def output_spec(self):
@@ -75,11 +91,11 @@ class BaseEngine(object):
         inp = np.ascontiguousarray(img, dtype=self.inputs[0]["dtype"])
         # H2D
         cudart.cudaMemcpyAsync(
-            self.inputs[0]["allocation"],                        # dst: device ptr
-            inp.ctypes.data,                                     # src: host ptr
+            self.inputs[0]["allocation"],  # dst: device ptr
+            inp.ctypes.data,  # src: host ptr
             inp.nbytes,
             cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
-            self.stream
+            self.stream,
         )
         # 執行
         self.context.execute_async_v3(self.stream)
@@ -87,11 +103,11 @@ class BaseEngine(object):
         # D2H 所有輸出
         for i, o in enumerate(self.outputs):
             cudart.cudaMemcpyAsync(
-                self.h_outputs[i].ctypes.data,                   # dst: host ptr
-                o["allocation"],                                 # src: device ptr
+                self.h_outputs[i].ctypes.data,  # dst: host ptr
+                o["allocation"],  # src: device ptr
                 o["size"],
                 cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
-                self.stream
+                self.stream,
             )
 
         cudart.cudaStreamSynchronize(self.stream)
@@ -121,9 +137,13 @@ class BaseEngine(object):
         )
 
         if dets is not None:
-            final_boxes, final_scores, final_cls_inds = dets[:, :4], dets[:, 4], dets[:, 5]
+            final_boxes, final_scores, final_cls_inds = (
+                dets[:, :4],
+                dets[:, 4],
+                dets[:, 5],
+            )
         return final_boxes, final_scores, final_cls_inds
-    
+
     def close(self):
         try:
             cudart.cudaStreamSynchronize(self.stream)
@@ -137,10 +157,11 @@ class BaseEngine(object):
         except Exception:
             pass
         for ptr in getattr(self, "allocations", []):
-            try: cudart.cudaFree(ptr)
-            except Exception: pass
+            try:
+                cudart.cudaFree(ptr)
+            except Exception:
+                pass
         self.allocations = []
         # 斷開參照，讓 Python GC 回收 TensorRT 物件
         self.context = None
         self.engine = None
-

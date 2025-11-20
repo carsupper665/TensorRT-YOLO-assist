@@ -4,25 +4,25 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
-from utils import common 
+from utils import common
+
 
 class BaseEngine(object):
     def __init__(self, engine_path):
         self.mean = None
         self.std = None
-        self.class_names = ['person', 
-                            'bicycle', 
-                            'car'
-                            ]
+        self.class_names = ["person", "bicycle", "car"]
         self.n_classes = len(self.class_names)
         logger = trt.Logger(trt.Logger.WARNING)
         logger.min_severity = trt.Logger.Severity.ERROR
         runtime = trt.Runtime(logger)
-        trt.init_libnvinfer_plugins(logger,'') # initialize TensorRT plugins
+        trt.init_libnvinfer_plugins(logger, "")  # initialize TensorRT plugins
         with open(engine_path, "rb") as f:
             serialized_engine = f.read()
         self.engine = runtime.deserialize_cuda_engine(serialized_engine)
-        self.imgsz = self.engine.get_tensor_shape(self.engine.get_tensor_name(0))[2:]  # get the read shape of model, in case user input it wrong
+        self.imgsz = self.engine.get_tensor_shape(self.engine.get_tensor_name(0))[
+            2:
+        ]  # get the read shape of model, in case user input it wrong
         self.context = self.engine.create_execution_context()
         # Setup I/O bindings
         self.inputs = []
@@ -42,12 +42,12 @@ class BaseEngine(object):
                 size *= s
             allocation = common.cuda_call(cudart.cudaMalloc(size))
             binding = {
-                'index': i,
-                'name': name,
-                'dtype': np.dtype(trt.nptype(dtype)),
-                'shape': list(shape),
-                'allocation': allocation,
-                'size': size
+                "index": i,
+                "name": name,
+                "dtype": np.dtype(trt.nptype(dtype)),
+                "shape": list(shape),
+                "allocation": allocation,
+                "size": size,
             }
             self.allocations.append(allocation)
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
@@ -62,7 +62,7 @@ class BaseEngine(object):
         """
         specs = []
         for o in self.outputs:
-            specs.append((o['shape'], o['dtype']))
+            specs.append((o["shape"], o["dtype"]))
         return specs
 
     def infer(self, img):
@@ -80,22 +80,25 @@ class BaseEngine(object):
             outputs.append(np.zeros(shape, dtype))
 
         # Process I/O and execute the network.
-        common.memcpy_host_to_device(self.inputs[0]['allocation'], np.ascontiguousarray(img))
+        common.memcpy_host_to_device(
+            self.inputs[0]["allocation"], np.ascontiguousarray(img)
+        )
 
         self.context.execute_v2(self.allocations)
         for o in range(len(outputs)):
-            common.memcpy_device_to_host(outputs[o], self.outputs[o]['allocation'])
+            common.memcpy_device_to_host(outputs[o], self.outputs[o]["allocation"])
         return outputs
 
     def detect_video(self, video_path, conf=0.5, end2end=False):
         cap = cv2.VideoCapture(video_path)
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        fourcc = cv2.VideoWriter_fourcc(*"XVID")
         fps = int(round(cap.get(cv2.CAP_PROP_FPS)))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        out = cv2.VideoWriter('results.avi',fourcc,fps,(width,height))
+        out = cv2.VideoWriter("results.avi", fourcc, fps, (width, height))
         fps = 0
         import time
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -103,25 +106,48 @@ class BaseEngine(object):
             blob, ratio = preproc(frame, self.imgsz, self.mean, self.std)
             t1 = time.time()
             data = self.infer(blob)
-            fps = (fps + (1. / (time.time() - t1))) / 2
-            frame = cv2.putText(frame, "FPS:%d " %fps, (0, 40), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                (0, 0, 255), 2)
+            fps = (fps + (1.0 / (time.time() - t1))) / 2
+            frame = cv2.putText(
+                frame,
+                "FPS:%d " % fps,
+                (0, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2,
+            )
             if end2end:
                 num, final_boxes, final_scores, final_cls_inds = data
-                final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
-                dets = np.concatenate([np.array(final_boxes)[:int(num[0])], np.array(final_scores)[:int(num[0])], np.array(final_cls_inds)[:int(num[0])]], axis=-1)
+                final_boxes = np.reshape(final_boxes / ratio, (-1, 4))
+                dets = np.concatenate(
+                    [
+                        np.array(final_boxes)[: int(num[0])],
+                        np.array(final_scores)[: int(num[0])],
+                        np.array(final_cls_inds)[: int(num[0])],
+                    ],
+                    axis=-1,
+                )
             else:
-                predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
-                dets = self.postprocess(predictions,ratio)
+                predictions = np.reshape(data, (1, -1, int(5 + self.n_classes)))[0]
+                dets = self.postprocess(predictions, ratio)
 
             if dets is not None:
-                final_boxes, final_scores, final_cls_inds = dets[:,
-                                                                :4], dets[:, 4], dets[:, 5]
-                frame = vis(frame, final_boxes, final_scores, final_cls_inds,
-                                conf=conf, class_names=self.class_names)
-            cv2.imshow('frame', frame)
+                final_boxes, final_scores, final_cls_inds = (
+                    dets[:, :4],
+                    dets[:, 4],
+                    dets[:, 5],
+                )
+                frame = vis(
+                    frame,
+                    final_boxes,
+                    final_scores,
+                    final_cls_inds,
+                    conf=conf,
+                    class_names=self.class_names,
+                )
+            cv2.imshow("frame", frame)
             out.write(frame)
-            if cv2.waitKey(25) & 0xFF == ord('q'):
+            if cv2.waitKey(25) & 0xFF == ord("q"):
                 break
         out.release()
         cap.release()
@@ -135,24 +161,40 @@ class BaseEngine(object):
         # print(ratio, dwdh)
         data = self.infer(img)
         if end2end:
-            print('end2end')
-            num, final_boxes, final_scores, final_cls_inds  = data
+            print("end2end")
+            num, final_boxes, final_scores, final_cls_inds = data
             # final_boxes, final_scores, final_cls_inds  = data
             dwdh = np.asarray(dwdh * 2, dtype=np.float32)
             final_boxes -= dwdh
-            final_boxes = np.reshape(final_boxes/ratio, (-1, 4))
+            final_boxes = np.reshape(final_boxes / ratio, (-1, 4))
             final_scores = np.reshape(final_scores, (-1, 1))
             final_cls_inds = np.reshape(final_cls_inds, (-1, 1))
-            dets = np.concatenate([np.array(final_boxes)[:int(num[0])], np.array(final_scores)[:int(num[0])], np.array(final_cls_inds)[:int(num[0])]], axis=-1)
+            dets = np.concatenate(
+                [
+                    np.array(final_boxes)[: int(num[0])],
+                    np.array(final_scores)[: int(num[0])],
+                    np.array(final_cls_inds)[: int(num[0])],
+                ],
+                axis=-1,
+            )
         else:
-            predictions = np.reshape(data, (1, -1, int(5+self.n_classes)))[0]
-            dets = self.postprocess(predictions,ratio)
+            predictions = np.reshape(data, (1, -1, int(5 + self.n_classes)))[0]
+            dets = self.postprocess(predictions, ratio)
 
         if dets is not None:
-            final_boxes, final_scores, final_cls_inds = dets[:,
-                                                             :4], dets[:, 4], dets[:, 5]
-            origin_img = vis(origin_img, final_boxes, final_scores, final_cls_inds,
-                             conf=conf, class_names=self.class_names)
+            final_boxes, final_scores, final_cls_inds = (
+                dets[:, :4],
+                dets[:, 4],
+                dets[:, 5],
+            )
+            origin_img = vis(
+                origin_img,
+                final_boxes,
+                final_scores,
+                final_cls_inds,
+                conf=conf,
+                class_names=self.class_names,
+            )
         return origin_img
 
     @staticmethod
@@ -160,17 +202,18 @@ class BaseEngine(object):
         boxes = predictions[:, :4]
         scores = predictions[:, 4:5] * predictions[:, 5:]
         boxes_xyxy = np.ones_like(boxes)
-        boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2.
-        boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2.
-        boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.
-        boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.
+        boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2.0
+        boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2.0
+        boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.0
+        boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.0
         boxes_xyxy /= ratio
         dets = multiclass_nms(boxes_xyxy, scores, nms_thr=0.45, score_thr=0.1)
         return dets
 
     def get_fps(self):
         import time
-        img = np.ones((1,3,self.imgsz[0], self.imgsz[1]))
+
+        img = np.ones((1, 3, self.imgsz[0], self.imgsz[1]))
         img = np.ascontiguousarray(img, dtype=np.float32)
         for _ in range(5):  # warmup
             _ = self.infer(img)
@@ -178,7 +221,7 @@ class BaseEngine(object):
         t0 = time.perf_counter()
         for _ in range(100):  # calculate average time
             _ = self.infer(img)
-        print(100/(time.perf_counter() - t0), 'FPS')
+        print(100 / (time.perf_counter() - t0), "FPS")
 
 
 def nms(boxes, scores, nms_thr):
@@ -261,10 +304,8 @@ def preproc(image, input_size, mean, std, swap=(2, 0, 1)):
     padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
     return padded_img, r
 
-def  letterbox(im,
-              new_shape = (640, 640),
-              color = (114, 114, 114),
-              swap=(2, 0, 1)):
+
+def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), swap=(2, 0, 1)):
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
@@ -274,8 +315,7 @@ def  letterbox(im,
     r = min(new_shape[0] / shape[1], new_shape[1] / shape[0])
     # Compute padding [width, height]
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
-    dw, dh = new_shape[0] - new_unpad[0], new_shape[1] - new_unpad[
-        1]  # wh padding
+    dw, dh = new_shape[0] - new_unpad[0], new_shape[1] - new_unpad[1]  # wh padding
 
     dw /= 2  # divide padding into 2 sides
     dh /= 2
@@ -284,26 +324,24 @@ def  letterbox(im,
         im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(im,
-                            top,
-                            bottom,
-                            left,
-                            right,
-                            cv2.BORDER_CONSTANT,
-                            value=color)  # add border
+    im = cv2.copyMakeBorder(
+        im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+    )  # add border
     im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
     im = im.transpose(swap)
-    im = np.ascontiguousarray(im, dtype=np.float32) / 255.
+    im = np.ascontiguousarray(im, dtype=np.float32) / 255.0
     return im, r, (dw, dh)
 
 
 def rainbow_fill(size=50):  # simpler way to generate rainbow color
-    cmap = plt.get_cmap('jet')
+    cmap = plt.get_cmap("jet")
     color_list = []
 
     for n in range(size):
-        color = cmap(n/size)
-        color_list.append(color[:3])  # might need rounding? (round(x, 3) for x in color)[:3]
+        color = cmap(n / size)
+        color_list.append(
+            color[:3]
+        )  # might need rounding? (round(x, 3) for x in color)[:3]
 
     return np.array(color_list)
 
@@ -324,7 +362,7 @@ def vis(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
         y1 = int(box[3])
 
         color = (_COLORS[cls_id] * 255).astype(np.uint8).tolist()
-        text = '{}:{:.1f}%'.format(class_names[cls_id], score * 100)
+        text = "{}:{:.1f}%".format(class_names[cls_id], score * 100)
         txt_color = (0, 0, 0) if np.mean(_COLORS[cls_id]) > 0.5 else (255, 255, 255)
         font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -337,8 +375,10 @@ def vis(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
             (x0, y0 + 1),
             (x0 + txt_size[0] + 1, y0 + int(1.5 * txt_size[1])),
             txt_bk_color,
-            -1
+            -1,
         )
-        cv2.putText(img, text, (x0, y0 + txt_size[1]), font, 0.4, txt_color, thickness=1)
+        cv2.putText(
+            img, text, (x0, y0 + txt_size[1]), font, 0.4, txt_color, thickness=1
+        )
 
     return img

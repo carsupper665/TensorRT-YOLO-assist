@@ -1,5 +1,7 @@
 import serial
 from serial.tools import list_ports
+
+
 class USBMouse:
     def __init__(self, device: str = "COM10"):
         self.serialcomm = serial.Serial(device, 115200, timeout=0.1)
@@ -13,7 +15,7 @@ class USBMouse:
         ix = int(dx)
         iy = int(dy)
         # 構造指令字串
-        prefix = 'silent' if silent else ''
+        prefix = "silent" if silent else ""
         cmd = f"{prefix}{ix}:{iy}"
         # 傳出
         self.serialcomm.write(cmd.encode())
@@ -24,19 +26,26 @@ class USBMouse:
     def open(self):
         self.serialcomm.open()
 
+
 def usb_com_ports():
     out = []
     text = ""
     for p in list_ports.comports():
-        if (p.vid is not None) or ("USB" in (p.description or "")) or ("USB" in (p.hwid or "")):
-            out.append({
-                "device": p.device,          # e.g. COM3
-                "desc": p.description,       # e.g. USB-SERIAL CH340
-                "vid": hex(p.vid) if p.vid is not None else None,
-                "pid": hex(p.pid) if p.pid is not None else None,
-                "manufacturer": p.manufacturer,
-                "serial_number": p.serial_number,
-            })
+        if (
+            (p.vid is not None)
+            or ("USB" in (p.description or ""))
+            or ("USB" in (p.hwid or ""))
+        ):
+            out.append(
+                {
+                    "device": p.device,  # e.g. COM3
+                    "desc": p.description,  # e.g. USB-SERIAL CH340
+                    "vid": hex(p.vid) if p.vid is not None else None,
+                    "pid": hex(p.pid) if p.pid is not None else None,
+                    "manufacturer": p.manufacturer,
+                    "serial_number": p.serial_number,
+                }
+            )
             text += f"{p.device}: {p.description}\n"
             text += f"    VID:PID={hex(p.vid) if p.vid is not None else 'N/A'}:{hex(p.pid) if p.pid is not None else 'N/A'}\n"
             text += f"    Manufacturer: {p.manufacturer}\n"

@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QFont
+
+
 class NavBar(QWidget):
     tabChanged = pyqtSignal(int)  # 自定義信號，發出選中的tab索引
 
@@ -46,18 +48,30 @@ class NavBar(QWidget):
         # Navigation buttons
         self.buttons = []
 
-        self.dashboard_btn = self._make_button("", icon_path=r"./src/images/home_btn.png", page_index=0, tooltip="首頁")
+        self.dashboard_btn = self._make_button(
+            "", icon_path=r"./src/images/home_btn.png", page_index=0, tooltip="首頁"
+        )
         layout.addWidget(self.dashboard_btn)
 
-        self.setting_btn = self._make_button("", icon_path=r"./src/images/settings_btn.png", page_index=1, tooltip="設置")
+        self.setting_btn = self._make_button(
+            "", icon_path=r"./src/images/settings_btn.png", page_index=1, tooltip="設置"
+        )
         layout.addWidget(self.setting_btn)
 
-        self.viewer_btn = self._make_button("", icon_path=r"./src/images/view_btn.png", page_index=2, tooltip="畫面顯示")
+        self.viewer_btn = self._make_button(
+            "", icon_path=r"./src/images/view_btn.png", page_index=2, tooltip="畫面顯示"
+        )
         layout.addWidget(self.viewer_btn)
 
-        layout.addItem(QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
+        layout.addItem(
+            QSpacerItem(
+                20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
+            )
+        )
 
-    def _make_button(self, text: str, icon_path: str | None, page_index: int, tooltip: str = "") -> QToolButton:
+    def _make_button(
+        self, text: str, icon_path: str | None, page_index: int, tooltip: str = ""
+    ) -> QToolButton:
         btn = QToolButton(self)
         btn.setText(text)
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -108,7 +122,9 @@ QToolButton:hover {
         self.buttons.append(btn)
         return btn
 
-    def _make_action_button(self, text: str, icon_path: str | None, tooltip: str = "") -> QToolButton:
+    def _make_action_button(
+        self, text: str, icon_path: str | None, tooltip: str = ""
+    ) -> QToolButton:
         """Create an action button (like logout) that doesn't have checked state"""
         btn = QToolButton(self)
         btn.setText(text)
@@ -201,6 +217,6 @@ QToolButton:hover {
             except Exception as e:
                 print(e)
                 b.setDisabled(False)
-    
+
     def set_enabled(self, page_index: int = None, enabled: bool = True):
         self.set_disabled(page_index, not enabled)

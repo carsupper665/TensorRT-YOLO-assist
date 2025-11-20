@@ -1,13 +1,12 @@
 # ui/home_page.py
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-)
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+
 
 class HomePage(QWidget):
     on_exception = pyqtSignal(type, object)
     startRequested = pyqtSignal()
-    stopRequested  = pyqtSignal()
+    stopRequested = pyqtSignal()
     restartRequested = pyqtSignal()
 
     def __init__(self, parent):
@@ -55,8 +54,12 @@ class HomePage(QWidget):
         self.restart_btn.clicked.connect(self._on_restart_requested)
 
         self.status = QLabel()
-        self.status.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.status.setStyleSheet("font-family:Inter, 'Segoe UI', sans-serif; font-size:14px; color:#ddd;")
+        self.status.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        )
+        self.status.setStyleSheet(
+            "font-family:Inter, 'Segoe UI', sans-serif; font-size:14px; color:#ddd;"
+        )
         # self.status.setMinimumWidth(120)
         self._set_status(False)
 
@@ -98,10 +101,10 @@ class HomePage(QWidget):
     def _apply_btn_style(self, running: bool):
         # 移除不支援的 filter，用不同底色表現 hover
         if running:
-            base = "#C62828"   # Stop
+            base = "#C62828"  # Stop
             hover = "#D32F2F"
         else:
-            base = "#2E7D32"   # Start
+            base = "#2E7D32"  # Start
             hover = "#388E3C"
         self.btn.setStyleSheet(
             f"""
@@ -112,8 +115,10 @@ class HomePage(QWidget):
         )
 
     def _set_status(self, running: bool):
-        dot = "\u25CF"  # ●
+        dot = "\u25cf"  # ●
         color = "#4CAF50" if running else "#9E9E9E"
-        text  = "Running" if running else "Stopped"
+        text = "Running" if running else "Stopped"
         # 使用 <br/> 比 \n 更穩定
-        self.status.setText(f"<span style='color:{color}; font-size:14px;'>{dot}</span><span>{text}</span>")
+        self.status.setText(
+            f"<span style='color:{color}; font-size:14px;'>{dot}</span><span>{text}</span>"
+        )
