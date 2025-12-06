@@ -174,12 +174,20 @@ class MainUI(QMainWindow):
         self.aim_sys.image_queue.connect(
             self.visualize_page.on_image, type=Qt.ConnectionType.QueuedConnection
         )
-        self.aim_sys.finished.connect(self.work_thread.quit)
-        self.aim_sys.finished.connect(lambda: self.home_page.set_running(False))
-        self.aim_sys.finished.connect(lambda: self.osd.hide())
+        # self.aim_sys.finished.connect(self.work_thread.quit)
+        self.aim_sys.finished.connect(self.on_aim_sys_finished)
+
         self.aim_sys.on_trigger.connect(self.osd.on_trigger)
 
         self.aim_sys.init_all()
+
+    @pyqtSlot()
+    def on_aim_sys_finished(self):
+        self.LOGGER.debug("Hide osd")
+        self.osd.hide()
+        # self.home_page.set_running(False)
+        self.LOGGER.debug("enabled start btn")
+        self.home_page.set_start_enabled(True)
 
     @pyqtSlot()
     def _start_aim_sys(self):
@@ -205,16 +213,32 @@ class MainUI(QMainWindow):
         if self.work_thread and self.work_thread.isRunning():
             self.work_thread.quit()
             self.work_thread.wait()
+            # timeout_ms = 5000
+            # QTimer.singleShot(timeout_ms, self._check_worker_timeout)
             # self.work_thread.deleteLater()
         self.home_page.set_running(False)
+        self.home_page.set_start_enabled(False)
         self.toast.show_notice(
             INFO,
-            "系統停止",
-            "AI輔助瞄準系統已停止。",
+            "系統停止中...",
+            "正在停止系統",
             3000,
             px=self._get_x(),
             py=self._get_y(),
         )
+
+    def _check_worker_timeout(self):
+        if self.work_thread and self.work_thread.isRunning():
+            self.toast.show_notice(
+                WARN,
+                "停止逾時",
+                "AI輔助瞄準系統在預期時間內未能正常停止，可能已卡住。",
+                5000,
+                px=self._get_x(),
+                py=self._get_y(),
+            )
+            self.work_thread.terminate()
+            self.work_thread.wait(100)
 
     @pyqtSlot()
     def _restart_aim_sys(self):
@@ -237,6 +261,7 @@ class MainUI(QMainWindow):
                 px=self._get_x(),
                 py=self._get_y(),
             )
+            self.home_page.set_start_enabled(True)
         except Exception as e:
             self._on_exception(type(e), e)
             return

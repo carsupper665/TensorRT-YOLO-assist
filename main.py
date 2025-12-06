@@ -1,4 +1,5 @@
-# ./main.py 你好ㄎㄎㄎ
+# ./main.py
+import sys
 import os
 import time
 import dxcam
@@ -114,6 +115,7 @@ class Main(QObject):
 
     def __init__(self, args: dict | str, no_gui: bool = True):
         self.running = False
+        self._is_cleaned = False # 管理線程狀態
 
         if not isinstance(args, dict) and not isinstance(args, str):
             raise TypeError("Config most be dict or str")
@@ -188,10 +190,18 @@ class Main(QObject):
         return data
 
     def _rework_dxc(self):
-        DXC = dxcam
-        org_cap = DXC.DXCamera._DXCamera__capture
-        DXC.DXCamera._DXCamera__capture = fixed_cap
-        self.cam = DXC.create(output_idx=0, output_color="BGRA")
+        fix_dxcame = self.args.get("fix_dxcame_error_hook", False)
+        self.cam = None
+
+        if fix_dxcame: 
+            self.LOGGER.warning(f"Using fix_dxcame_error_hook: {fix_dxcame}")
+            DXC = dxcam
+            org_cap = DXC.DXCamera._DXCamera__capture
+            DXC.DXCamera._DXCamera__capture = fixed_cap
+            self.cam = DXC.create(output_idx=0, output_color="BGRA")
+        else:
+            self.cam = dxcam.create(output_idx=0, output_color="BGRA")
+
         self.grab_screen = self._dx_grab_screen
 
     def init_camera(self):
@@ -207,6 +217,7 @@ class Main(QObject):
 
         if self.cam_type == "dxcam":
             self._rework_dxc()
+
         else:
             self.grab_screen = self._mss_grab_screen
 
@@ -446,25 +457,27 @@ class Main(QObject):
                     classes,
                 )
         else:
-            self.image_queue.emit(
-                img,
-                None,
-                None,
-                None,
-            )
+            time.sleep(0.001)
+            if not self.no_gui:
+                self.image_queue.emit(
+                    img,
+                    None,
+                    None,
+                    None,
+                )
 
     @pyqtSlot()
     def start(self):
         if self.running:
             self.LOGGER.warning("Already running")
             return
+        self._is_cleaned = False
         self.running = True
         self.LOGGER.info("Starting main process")
-
         try:
             if self.cam_type == "dxcam":
-                if self._on_dxcam_reinit:
-                    import gc
+                import gc
+                if self._on_dxcam_reinit and hasattr(self, "cam"):
 
                     self.LOGGER.warning(f"Rebuild DXC")
                     self.cam.stop()
@@ -475,6 +488,10 @@ class Main(QObject):
                     # self.cam = None
                     self._rework_dxc()
                     self._on_dxcam_reinit = False
+                elif not hasattr(self, "cam"):
+                    gc.collect()
+                    self.cam = None
+                    self._rework_dxc()
 
                 self.cam.start(region=self.box, target_fps=240)
                 time.sleep(0.3)  # warmup
@@ -509,40 +526,38 @@ class Main(QObject):
 
             while self.running:
                 self.forward()
+
         except TypeError as te:
+            sys.__excepthook__(type(te), te, None)
             if str(te) == "'NoneType' object is not subscriptable":
                 self.LOGGER.error(f"TypeError: {te}")
             self.LOGGER.warning(f"Sys Auto Stop.")
             self._on_dxcam_reinit = True
         except Exception as e:
+            sys.__excepthook__(type(e), e, None)
             self.LOGGER.error(f"Error occurred: {e}")
             if not self.no_gui:
                 self.on_exception.emit(type(e), e)
         except KeyboardInterrupt:
             self.LOGGER.info("KeyboardInterrupt received. Stopping...")
         finally:
-            time.sleep(0.3)  # wait ui
+            if not self._is_cleaned:
+                self.cleanup(True)
 
-            if self.cam_type == "dxcam":
-                self.cam.stop()
-                # self.cam.release()
-
-            self.kb_Listener.stop()
-            self.listener.stop()
-
-            self.m.close()
-
-            self.running = False
-            self.LOGGER.info("Main process stopped")
             if not self.no_gui:
+                time.sleep(0.3)  # wait ui
                 self.LOGGER.debug("Emitting finished signal")
                 self.finished.emit()
 
-    def cleanup(self):
-        if self.cam:
-            if self.cam_type == "dxcam" and self.cam.is_capturing:
-                self.cam.stop()
-                del self.cam
+    def cleanup(self, pause: bool = False):
+        if hasattr(self, "cam"):
+            if self.cam:
+                self.LOGGER.debug(f"Dxcame closed status: {self.cam.is_capturing}")
+
+                if self.cam_type == "dxcam" and self.cam.is_capturing:
+                    self.cam.stop()
+                    del self.cam
+                    self.LOGGER.debug("obj del self.cam")
 
         if self.kb_Listener and self.kb_Listener.running:
             self.kb_Listener.stop()
@@ -550,14 +565,18 @@ class Main(QObject):
         if self.listener and self.listener.running:
             self.listener.stop()
 
-        if self.m:
-            self.m.close()
-            self.m = None
-            del self.m
+        self.LOGGER.debug("All listener closed")
 
-        if self.engine:
-            self.engine.close()
+        if not pause:
+            if self.m:
+                self.m.close()
+                self.m = None
+                del self.m
 
+            if self.engine:
+                self.engine.close()
+
+        self._is_cleaned = True
         self.LOGGER.info("Cleaned up resources.")
 
     @pyqtSlot()
@@ -567,3 +586,26 @@ class Main(QObject):
             return
         self.running = False
         self.LOGGER.info("Stopping main process")
+        t = threading.Thread(target=self._interruption_when_time_out)
+        t.start()
+        # t.join()
+
+    def timer(self, time_out: int):
+        start_time = time.time()
+        while time.time() - start_time <= time_out:
+            if self._is_cleaned:
+                break
+            time.sleep(0.001)
+
+    def _interruption_when_time_out(self):
+        time_out = 10 #s
+        self.timer(time_out)
+
+        if not self._is_cleaned: # 當機了 沒有成功清除
+            self.LOGGER.warning(f"thread request Interruption")
+            self.cleanup(True)
+            if not self.no_gui:
+                # time.sleep(0.3)  # wait ui
+                self.LOGGER.debug("Emitting finished signal")
+                self.finished.emit()
+

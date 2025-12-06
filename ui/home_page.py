@@ -84,6 +84,9 @@ class HomePage(QWidget):
     def set_restart_enabled(self, enabled: bool):
         self.restart_btn.setEnabled(enabled)
 
+    def set_start_enabled(self, enabled: bool):
+        self.btn.setEnabled(enabled) 
+
     # 內部：按鈕切換
     def _toggle(self):
         if self._running:

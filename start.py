@@ -42,7 +42,7 @@ if __name__ == "__main__":
     if args.no_gui:
         from main import Main
 
-        main = Main(no_gui=True)
+        main = Main(args=args.cfg,no_gui=True)
         main.start()
     else:
         from main_ui import MainUI

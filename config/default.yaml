@@ -29,6 +29,7 @@ mouse:
 resolution_x: 1920
 resolution_y: 1080
 camera: "dxcam" # Change this option to 'mss' for better performance on low refresh rate monitors. 
+fix_dxcame_error_hook: False # maye Have an issus
 
 debug: True # Works well with UI
 log_level: "info" # Options: debug, info, warning, error, Only works when running in no-GUI mode
