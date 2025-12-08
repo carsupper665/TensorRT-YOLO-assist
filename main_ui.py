@@ -185,7 +185,7 @@ class MainUI(QMainWindow):
     def on_aim_sys_finished(self):
         self.LOGGER.debug("Hide osd")
         self.osd.hide()
-        # self.home_page.set_running(False)
+        self.home_page.set_running(False)
         self.LOGGER.debug("enabled start btn")
         self.home_page.set_start_enabled(True)
 
@@ -208,6 +208,8 @@ class MainUI(QMainWindow):
 
     @pyqtSlot()
     def _stop_aim_sys(self):
+        self.home_page.set_start_enabled(False)
+
         if self.aim_sys:
             self.aim_sys.stop()
         if self.work_thread and self.work_thread.isRunning():
@@ -216,8 +218,7 @@ class MainUI(QMainWindow):
             # timeout_ms = 5000
             # QTimer.singleShot(timeout_ms, self._check_worker_timeout)
             # self.work_thread.deleteLater()
-        self.home_page.set_running(False)
-        self.home_page.set_start_enabled(False)
+        
         self.toast.show_notice(
             INFO,
             "系統停止中...",

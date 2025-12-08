@@ -24,22 +24,40 @@ from dxcam.util.timer import (
     cancel_timer,
 )
 
+def safe_stop(self, ):
+    t = getattr(self, "_DXCamera__thread", None)
+    if self.is_capturing:
+            self._DXCamera__frame_available.set()
+            self._DXCamera__stop_capture.set()
+            if (
+                t is not None
+                and t is not threading.current_thread()
+                and t.is_alive()):
+                try:
+                    t.join(timeout=10)
+                except RuntimeError as e:
+                    print(e)
+    self._DXCamera__frame_buffer = None
+    self._DXCamera__frame_count = 0
+    self._DXCamera__frame_available.clear()
+    self._DXCamera__stop_capture.clear()
+    self._DXCamera__thread = None
 
 def fixed_cap(
     self, region: Tuple[int, int, int, int], target_fps: int = 60, video_mode=False
 ):
     if target_fps != 0:
         period_ms = 1000 // target_fps  # millisenonds for periodic timer
-        self.__timer_handle = create_high_resolution_timer()
-        set_periodic_timer(self.__timer_handle, period_ms)
+        self._DXCamera__timer_handle = create_high_resolution_timer()
+        set_periodic_timer(self._DXCamera__timer_handle, period_ms)
 
-    self.__capture_start_time = time.perf_counter()
+    self._DXCamera__capture_start_time = time.perf_counter()
 
     capture_error = None
 
     while not self._DXCamera__stop_capture.is_set():
         if self._DXCamera__timer_handle:
-            res = wait_for_timer(self.__timer_handle, INFINITE)
+            res = wait_for_timer(self._DXCamera__timer_handle, INFINITE)
             if res == WAIT_FAILED:
                 self.__stop_capture.set()
                 capture_error = ctypes.WinError()
@@ -101,7 +119,7 @@ def fixed_cap(
         self._DXCamera__stop_capture.clear()
         raise capture_error
     print(
-        f"Screen Capture FPS: {int(self._DXCamera__frame_count / (time.perf_counter() - self.__capture_start_time))}"
+        f"Screen Capture FPS: {int(self._DXCamera__frame_count / (time.perf_counter() - self._DXCamera__capture_start_time))}"
     )
 
 
@@ -190,11 +208,17 @@ class Main(QObject):
         return data
 
     def _rework_dxc(self):
-        fix_dxcame = self.args.get("fix_dxcame_error_hook", False)
+        fix_dxcam: bool = self.args.get("fix_dxcam_error_hook", False)
+        fix_dxcam_thread_join = self.args.get("fix_dxcam_thread_join", False)
+
+        if fix_dxcam_thread_join:
+            self.LOGGER.warning(f"Using fix_dxcam_thread_join: {fix_dxcam_thread_join}")
+            dxcam.DXCamera.stop = safe_stop
+
         self.cam = None
 
-        if fix_dxcame: 
-            self.LOGGER.warning(f"Using fix_dxcame_error_hook: {fix_dxcame}")
+        if fix_dxcam: 
+            self.LOGGER.warning(f"Using fix_dxcam_error_hook: {fix_dxcam}")
             DXC = dxcam
             org_cap = DXC.DXCamera._DXCamera__capture
             DXC.DXCamera._DXCamera__capture = fixed_cap
@@ -322,12 +346,12 @@ class Main(QObject):
         # if k == "Key." + self.silent_aim_btn or k == self.silent_aim_btn:
         #     self.silent_aiming = not self.silent_aiming
         #     self.LOGGER.info(f"silent Shoot {'ON' if self.silent_aiming else 'OFF'}")
-        self.LOGGER.debug(f"Key pressed: {key}")
+        # self.LOGGER.debug(f"Key pressed: {key}")
 
     def on_click(self, x, y, button, pressed):
-        self.LOGGER.debug(
-            f"Mouse clicked at ({x}, {y}) with {button}, pressed={pressed}"
-        )
+        # self.LOGGER.debug(
+        #     f"Mouse clicked at ({x}, {y}) with {button}, pressed={pressed}"
+        # )
         if button == getattr(Button, self.toggle_aim):
             if pressed:
                 self.aim = not self.aim
@@ -541,6 +565,8 @@ class Main(QObject):
         except KeyboardInterrupt:
             self.LOGGER.info("KeyboardInterrupt received. Stopping...")
         finally:
+            self.running = False
+
             if not self._is_cleaned:
                 self.cleanup(True)
 
@@ -583,6 +609,7 @@ class Main(QObject):
     def stop(self):
         if not self.running:
             self.LOGGER.warning("Not running")
+            self.finished.emit()
             return
         self.running = False
         self.LOGGER.info("Stopping main process")
