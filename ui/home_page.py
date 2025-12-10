@@ -31,8 +31,6 @@ class HomePage(QWidget):
         )
         v.addWidget(title, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        # 控制列：Start/Stop + 狀態
-        # 控制列：Start/Stop + 狀態（置中，間距 20px）
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(50)
@@ -69,7 +67,6 @@ class HomePage(QWidget):
         v.addLayout(row)
         v.addStretch(1)
 
-    # 公開 API：外部可直接設狀態
     def set_running(self, running: bool):
         if self._running == running:
             return
@@ -87,7 +84,6 @@ class HomePage(QWidget):
     def set_start_enabled(self, enabled: bool):
         self.btn.setEnabled(enabled) 
 
-    # 內部：按鈕切換
     def _toggle(self):
         if self._running:
             self.stopRequested.emit()
@@ -102,7 +98,6 @@ class HomePage(QWidget):
         self._set_status(self._running)
 
     def _apply_btn_style(self, running: bool):
-        # 移除不支援的 filter，用不同底色表現 hover
         if running:
             base = "#C62828"  # Stop
             hover = "#D32F2F"
@@ -121,7 +116,6 @@ class HomePage(QWidget):
         dot = "\u25cf"  # ●
         color = "#4CAF50" if running else "#9E9E9E"
         text = "Running" if running else "Stopped"
-        # 使用 <br/> 比 \n 更穩定
         self.status.setText(
             f"<span style='color:{color}; font-size:14px;'>{dot}</span><span>{text}</span>"
         )

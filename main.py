@@ -326,7 +326,7 @@ class Main(QObject):
 
     def on_release(self, key):
         k = f"{key}"
-        self.LOGGER.debug(f"Key released: {key}")
+        # self.LOGGER.debug(f"Key released: {key}")
         # if key == getattr(KB.Key, self.toggle_silent):
         #     self.silent_aim = not self.silent_aim
         #     self.LOGGER.info(f"silent aim {'ON' if self.silent_aim else 'OFF'}")
@@ -411,7 +411,7 @@ class Main(QObject):
 
         # 取最近者
         idx = np.argmin(dis[ok])
-        # 回傳最小必要資訊
+        # 回傳最近者
         sel = np.flatnonzero(ok)[idx]
         return cx[sel], cy[sel], dis[sel], boxes[sel]
 

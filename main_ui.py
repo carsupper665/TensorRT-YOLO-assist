@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QTimer
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QTimer, QSettings
+
 import sys
 import os
 import time
@@ -35,6 +36,8 @@ class MainUI(QMainWindow):
         self.resize(16 * 60, 9 * 60)
         self.setStyleSheet("background-color: #212121;")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+        self.settings: QSettings | None = None
 
         self.aim_sys = None  # Main instance
 
@@ -282,7 +285,7 @@ class MainUI(QMainWindow):
         try:
             if self.loading_thread and self.loading_thread.isRunning():
                 self.loading_thread.quit()
-                self.loading_thread.wait()
+                self.loading_thread.wait(5000)
                 self.LOGGER.debug("Loading thread stopped successfully.")
         except Exception as e:
             self.LOGGER.error(f"Error while stopping loading thread: {e}")
@@ -492,6 +495,10 @@ class StartUp(QObject):
         except Exception as e:
             # raise e
             return False, None, e
+        
+    def _is_checked(self, ) -> bool:
+        self.settings = QSettings("ClumsyCompany", "ClumsyApp") # XD
+        return self.settings.value("env_ok", False, type=bool)
 
     def env_check(self, progress_value: int) -> dict:
         """
@@ -500,6 +507,10 @@ class StartUp(QObject):
         並透過 emit_helper 回報進度。
         progress_value 最後為40
         """
+        if self._is_checked():
+            self.logger.info("Environment already checked, skipping.")
+            return {"ok": True, "modules": {}, "gpu": {}}
+        
         targets = [
             "serial",
             "yaml",
@@ -615,6 +626,9 @@ class StartUp(QObject):
                 v10=True,
                 end2end=True,
             )
+
+        if result["ok"]:
+            self.settings.setValue("env_ok", True)
 
         return result
 

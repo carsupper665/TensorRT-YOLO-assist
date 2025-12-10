@@ -34,3 +34,5 @@ fix_dxcam_thread_join: False
 
 debug: True # Works well with UI
 log_level: "info" # Options: debug, info, warning, error, Only works when running in no-GUI mode
+
+auto_update: True
