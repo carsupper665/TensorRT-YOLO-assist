@@ -8,7 +8,7 @@ import threading, queue
 from typing import Tuple
 from simple_pid import PID
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
-from utils.logger import loggerFactory, C
+from utils.logger import get_logger, C, LoggerConfig
 from utils.mouse import USBMouse
 from inference import BaseEngine
 from pynput.mouse import Button, Listener
@@ -148,10 +148,8 @@ class Main(QObject):
 
         if self.args["debug"]:
             log_level = "DEBUG"
-
-        self.LOGGER = loggerFactory(
-            log_level=log_level, logger_name="AimSys"
-        ).getLogger()
+        cfg = LoggerConfig(name="AimSys", level=log_level)
+        self.LOGGER = get_logger(cfg)
 
         self.no_gui = no_gui
 

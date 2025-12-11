@@ -1,130 +1,135 @@
-# src/loger.py
+from __future__ import annotations
 import logging
-import os
+from logging import Handler
+from logging.handlers import RotatingFileHandler
+from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import datetime
+import sys
+from typing import Dict, Optional
 
-#####
-# 🔥📌✅📂📄🔹🎨😃🚀❌🔧⚠📁🗑️🔇🛑🎙️🎤
-
-C = {
-    "red": "\033[91m",
-    "green": "\033[92m",
-    "blue": "\033[94m",
-    "yellow": "\033[93m",
-    "cyan": "\033[96m",
-    "magenta": "\033[95m",
-    "black": "\033[30m",
-    "white": "\033[97m",
-    "gray": "\033[37m",
-    "orange": "\033[33m",
-    "purple": "\033[35m",
-    "pink": "\033[95m",
-    # 背景色
-    "bg_red": "\033[41m",
-    "bg_green": "\033[42m",
-    "bg_blue": "\033[44m",
-    "bg_yellow": "\033[43m",
-    "bg_cyan": "\033[46m",
-    "bg_magenta": "\033[45m",
-    "bg_black": "\033[40m",
-    "bg_white": "\033[47m",
+# ANSI palette
+C: Dict[str, str] = {
+    "red": "\033[91m", "green": "\033[92m", "blue": "\033[94m",
+    "yellow": "\033[93m", "cyan": "\033[96m", "magenta": "\033[95m",
+    "black": "\033[30m", "white": "\033[97m", "gray": "\033[37m",
+    "bg_red": "\033[41m", "bg_green": "\033[42m", "bg_blue": "\033[44m",
+    "bg_yellow": "\033[43m", "bg_cyan": "\033[46m", "bg_magenta": "\033[45m",
+    "bg_black": "\033[40m", "bg_white": "\033[47m",
     "r": "\033[0m",
 }
 
+@dataclass
+class LoggerConfig:
+    name: str = "main"
+    level: int | str = logging.DEBUG
+    to_file: bool = False
+    file_dir: Path = Path("./logs")
+    file_name: str = "app"
+    static_file_name: bool = False          
+    rotate: bool = True             
+    max_bytes: int = 2 * 1024 * 1024
+    backup_count: int = 0
+    use_color: Optional[bool] = None  # None=自動偵測 TTY
+    datefmt: str = "%Y-%m-%d %H:%M:%S"
 
-class levelFormatter(logging.Formatter):
-    """讓不同 Log Level 使用不同格式"""
+    level_formats: Dict[int, str] = field(default_factory=lambda: {
+        logging.DEBUG:    f"%(asctime)s [%(name)s] {C['cyan']}[DEBUG]{C['r']}    | %(message)s",
+        logging.INFO:     f"%(asctime)s [%(name)s] {C['green']}[INFO]{C['r']}     | %(message)s",
+        logging.WARNING:  f"%(asctime)s [%(name)s] {C['yellow']}[WARNING]{C['r']}  | %(message)s",
+        logging.ERROR:    f"%(asctime)s [%(name)s] {C['red']}[ERROR]{C['r']}    | %(message)s",
+        logging.CRITICAL: f"%(asctime)s [%(name)s] {C['bg_red']}{C['white']}[CRITICAL]{C['r']} | %(message)s",
+    })
 
-    def __init__(self, fmt_dict):
-        super().__init__()
-        self.fmt_dict = fmt_dict
-        self.default_fmt = fmt_dict.get(logging.DEBUG, "%(levelname)s: %(message)s")
+    # 檔案寫入不含 ANSI
+    file_format: str = "%(asctime)s [%(name)s] [%(levelname)s] | %(message)s"
 
-    def format(self, record):
-        log_fmt = self.fmt_dict.get(record.levelno, self.default_fmt)
-        formatter = logging.Formatter(
-            log_fmt,
-        )
-        return formatter.format(record)
+def _normalize_level(level: int | str) -> int:
+    if isinstance(level, int):
+        return level
+    if isinstance(level, str):
+        lvl = logging.getLevelName(level.upper())
+        # getLevelName 回傳 str 時代表不合法
+        if isinstance(lvl, int):
+            return lvl
+    return logging.INFO
 
+# -------- formatters --------
+class LevelFormatter(logging.Formatter):
+    """依 level 套用不同格式。"""
+    def __init__(self, fmt_map: Dict[int, str], datefmt: Optional[str] = None):
+        super().__init__(datefmt=datefmt)
+        self.fmt_map = fmt_map
+        self.default = "%(levelname)s: %(message)s"
+        self.datefmt = datefmt
 
-class loggerFactory:
-    def __init__(
-        self,
-        logger_name: str = "main",
-        log_level: int | str = logging.DEBUG,
-        write_log: bool = False,
-        file_name: str = "log",
-        path: str = "./logs",
-    ):
-        if isinstance(log_level, str):
-            log_level = logging._nameToLevel.get(log_level.upper(), logging.INFO)
+    def format(self, record: logging.LogRecord) -> str:
+        fmt = self.fmt_map.get(record.levelno, self.default)
+        return logging.Formatter(fmt=fmt, datefmt=self.datefmt).format(record)
 
-        self.write_log = write_log
-        log_path = os.path.join(os.getcwd(), path)
-        if not os.path.exists(log_path):
-            os.makedirs(log_path)
+# -------- factory --------
+def get_logger(cfg: LoggerConfig) -> logging.Logger:
+    lvl = _normalize_level(cfg.level)
+    logger = logging.getLogger(cfg.name)
+    logger.setLevel(lvl)
+    logger.propagate = False  # 避免傳到 root 重複輸出
 
-        fname = datetime.now().strftime("%y-%m-%d-%H%M%S") + file_name + ".log"
+    if getattr(logger, "_configured", False):
+        return logger
 
-        log_file = os.path.join(log_path, fname)
+    handlers: list[Handler] = []
 
-        self.logger = logging.getLogger(
-            logger_name,
-        )
-        self.logger.setLevel(log_level)
-        self.logger.propagate = False  # 防止重複打印
+    use_color = cfg.use_color if cfg.use_color is not None else sys.stdout.isatty()
+    if use_color:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(lvl)
+        ch.setFormatter(LevelFormatter(cfg.level_formats, datefmt=cfg.datefmt))
+        handlers.append(ch)
+    else:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(lvl)
+        ch.setFormatter(logging.Formatter("%(asctime)s [%(name)s] [%(levelname)s] | %(message)s",
+                                          datefmt=cfg.datefmt))
+        handlers.append(ch)
 
-        if not self.logger.handlers:
-            # 設定 Log 格式
-            log_formats = {
-                logging.DEBUG: f"%(asctime)s [%(name)s] {C['cyan']}[DEBUG] | %(message)s"
-                + C["r"],
-                logging.INFO: f"%(asctime)s [%(name)s] {C['green']}[INFO]{C['r']}  | %(message)s"
-                + C["r"],
-                logging.WARNING: f"%(asctime)s [%(name)s] {C['yellow']}[WARN]  | %(message)s"
-                + C["r"],
-                logging.ERROR: f"%(asctime)s [%(name)s] {C['red']}[ERROR] | %(message)s"
-                + C["r"],
-                logging.CRITICAL: f"%(asctime)s [%(name)s] ❌{C['bg_red'] + C['white']}[CRITICAL] | %(message)s"
-                + C["r"]
-                + "❌",
-            }
-            formatter = levelFormatter(log_formats)
+    if cfg.to_file:
+        cfg.file_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%y-%m-%d-%H%M%S")
+        
+        if cfg.static_file_name:
+            file_path = cfg.file_dir / f"{cfg.file_name}.log"
+                
+        else:
+            file_path = cfg.file_dir / f"{ts}_{cfg.file_name}.log"
 
-            # Console Handler (顯示在終端機)
-            # stream = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
+        if cfg.rotate:
+            fh: Handler = RotatingFileHandler(
+                file_path, mode='w',maxBytes=cfg.max_bytes, backupCount=cfg.backup_count, encoding="utf-8"
+            )
+        else:
+            fh = logging.FileHandler(file_path, mode='w',encoding="utf-8")
+        fh.setLevel(lvl)
+        fh.setFormatter(logging.Formatter(cfg.file_format, datefmt=cfg.datefmt))
+        handlers.append(fh)
 
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(formatter)
+    for h in handlers:
+        logger.addHandler(h)
 
-            # 加入 Handler
-            if self.write_log:
-                print(f"Log file: {log_file}")
-                # File Handler (寫入檔案)
-                file_handler = logging.FileHandler(log_file, encoding="utf-8")
-                file_handler.setFormatter(formatter)
-                self.logger.addHandler(file_handler)
-            self.logger.addHandler(console_handler)
-
-    def getLogger(self):
-        return self.logger
-
-
-class testlog(loggerFactory):
-    def __init__(self):
-        super().__init__(write_log=True)
-        self.logger = self.getLogger()
-        self.logger.info("test✅✅")
-
-    def test(self):
-        self.logger.debug("debug")
-        self.logger.info("info✅✅")
-        self.logger.warning("warning")
-        self.logger.error("error")
-        self.logger.critical("critical")
-
+    logger._configured = True  # 標記避免重複加 handler
+    return logger
 
 if __name__ == "__main__":
-    test = testlog()
-    test.test()
+    cfg = LoggerConfig(
+        name="demo",
+        level="DEBUG",
+        to_file=True,
+        file_dir=Path("./logs"),
+        file_name="demo",
+        rotate=True,
+    )
+    log = get_logger(cfg)
+    log.debug("debug")
+    log.info("info ✅")
+    log.warning("warning")
+    log.error("error")
+    log.critical("critical")

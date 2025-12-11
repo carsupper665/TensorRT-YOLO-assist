@@ -10,9 +10,10 @@ from pathlib import Path
 import sys
 from packaging.tags import sys_tags
 from packaging.utils import parse_wheel_filename
-from src.logger import loggerFactory, C
+from src.logger import get_logger, C, LoggerConfig
 import json
 from pprint import pformat
+from utils.updater import Updater
 # from cuda import cudart
 # import importlib, pkgutil, cuda
 
@@ -27,9 +28,15 @@ class MainUI(QMainWindow):
         self.cfg_path = cfg_path
         if level:
             self.args["log_level"] = level
-        self.LOGGER = loggerFactory(
-            log_level=self.args["log_level"], logger_name="MainUI"
-        ).getLogger()
+        log_cfg = LoggerConfig(
+        name="MainUI",
+        level=self.args["log_level"],
+        to_file=False,
+        file_dir=Path("./logs"),
+        file_name="log",
+        rotate=True,
+    )
+        self.LOGGER = get_logger(log_cfg)
         self.LOGGER.info("⏳Starting up...")
         self.setObjectName(self.__class__.__name__)
         self.setWindowTitle("手殘黨")
@@ -124,7 +131,7 @@ class MainUI(QMainWindow):
         self.loading_worker = None
 
     def _set_aim_sys(self, aim_sys: object | None, status: str = ""):
-        if aim_sys is None and status == "install_package_end":
+        if aim_sys is None and status in ["install_package_end", "Update"]:
             self.toast.show_notice(
                 "info", "Rebooting App", "Packages installed. Restarting...", 5000
             )
@@ -369,7 +376,21 @@ class StartUp(QObject):
                     formatted_res = str(res)
             self.logger.debug("env check result:\n%s", formatted_res)
             value = 41
-            self.emit_helper("init_AimSys", value, "Initializing system...")
+
+            if self.args['auto_update']:
+                upd = Updater(on_update_func=self.emit_helper, value=value)
+                up_success, exc = upd.start_update()
+                if exc is not None:
+                    self.settings.setValue("env_ok", False)
+                    self.emit_helper("init_AimSys", value, "Update Fail, Initializing system...")
+                elif up_success is True:
+                    self.emit_helper("Update success", value, "Update success, Initializing system...")
+                    self.res.emit(None, "Update")
+                    return
+                else:
+                    self.emit_helper("init_AimSys", value, "Initializing system...")
+            else:
+                self.emit_helper("init_AimSys", value, "Initializing system...")
 
             from main import Main
 
