@@ -19,6 +19,8 @@ import argparse
 import os
 import ctypes
 import dataclasses
+import time
+from collections import deque
 from typing import Optional, List
 
 import numpy as np
@@ -321,3 +323,33 @@ def do_inference_v2(context, bindings, inputs, outputs, stream):
         context.execute_async_v2(bindings=bindings, stream_handle=stream)
 
     return _do_inference_base(inputs, outputs, stream, execute_async)
+
+class HighQualityTimer:
+    def __init__(self, avg_size=120):
+        self.start_ns = time.perf_counter_ns()
+        self.last_ns = self.start_ns
+        self.frame_times_ms = deque(maxlen=avg_size)
+        self.frame_count = 0
+
+    def update(self):
+        now_ns = time.perf_counter_ns()
+
+        dt_ms = (now_ns - self.last_ns) / 1_000_000.0
+        elapsed_s = (now_ns - self.start_ns) / 1_000_000_000.0
+
+        self.last_ns = now_ns
+        self.frame_count += 1
+
+        if dt_ms > 0:
+            self.frame_times_ms.append(dt_ms)
+
+        avg_ms = sum(self.frame_times_ms) / len(self.frame_times_ms) if self.frame_times_ms else 0
+        fps = 1000.0 / avg_ms if avg_ms > 0 else 0
+
+        return {
+            "elapsed_s": elapsed_s,
+            "dt_ms": dt_ms,
+            "avg_ms": avg_ms,
+            "fps": fps,
+            "frame": self.frame_count,
+        }

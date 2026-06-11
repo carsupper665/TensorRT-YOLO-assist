@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 
 from utils import common
+from utils.common import HighQualityTimer
 
 
 class BaseEngine(object):
@@ -26,6 +27,8 @@ class BaseEngine(object):
         self.imgsz = in_shape0[-2:]  # H, W
 
         self.context = self.engine.create_execution_context()
+        self.timer = HighQualityTimer()
+        self.infer_status = dict()
 
         # ---- 一次性配置 I/O ----
         self.inputs, self.outputs, self.allocations = [], [], []
@@ -86,6 +89,13 @@ class BaseEngine(object):
     def output_spec(self):
         return [(o["shape"], o["dtype"]) for o in self.outputs]
 
+    def _update_infer_status(self):
+        data = self.timer.update()
+        self.infer_status = data
+
+    def get_infer_status(self):
+        return self.infer_status
+
     def infer(self, img):
         # 轉型為引擎期望 dtype，確保連續
         inp = np.ascontiguousarray(img, dtype=self.inputs[0]["dtype"])
@@ -142,6 +152,7 @@ class BaseEngine(object):
                 dets[:, 4],
                 dets[:, 5],
             )
+        self._update_infer_status()
         return final_boxes, final_scores, final_cls_inds
 
     def close(self):

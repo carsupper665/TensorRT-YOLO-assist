@@ -5,6 +5,7 @@ import cv2
 import matplotlib.pyplot as plt
 
 from utils import common
+from utils.common import HighQualityTimer
 
 
 class BaseEngine(object):
@@ -13,6 +14,8 @@ class BaseEngine(object):
         self.std = None
         self.class_names = ["person", "bicycle", "car"]
         self.n_classes = len(self.class_names)
+        self.timer = HighQualityTimer()
+        self.infer_status = dict()
         logger = trt.Logger(trt.Logger.WARNING)
         logger.min_severity = trt.Logger.Severity.ERROR
         runtime = trt.Runtime(logger)
@@ -65,6 +68,13 @@ class BaseEngine(object):
             specs.append((o["shape"], o["dtype"]))
         return specs
 
+    def _update_infer_status(self):
+        data = self.timer.update()
+        self.infer_status = data
+
+    def get_infer_status(self):
+        return self.infer_status
+
     def infer(self, img):
         """
         Execute inference on a batch of images. The images should already be batched and preprocessed, as prepared by
@@ -87,6 +97,7 @@ class BaseEngine(object):
         self.context.execute_v2(self.allocations)
         for o in range(len(outputs)):
             common.memcpy_device_to_host(outputs[o], self.outputs[o]["allocation"])
+        self._update_infer_status()
         return outputs
 
     def detect_video(self, video_path, conf=0.5, end2end=False):
