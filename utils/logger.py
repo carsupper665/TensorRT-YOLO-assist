@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
 import sys
+import os
 from typing import Dict, Optional
 
 # ANSI palette
@@ -18,6 +19,31 @@ C: Dict[str, str] = {
     "bg_black": "\033[40m", "bg_white": "\033[47m",
     "r": "\033[0m",
 }
+
+Asi_enable = False
+def enable_windows_ansi():
+    global Asi_enable
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        if Asi_enable:
+            return
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        if handle in (0, -1):
+            Asi_enable = True
+            return
+
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)) == 0:
+            Asi_enable = True
+            return
+        kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    except Exception as ex:
+        print(f"Can't enable windows ansi: {ex}")
+        return
 
 @dataclass
 class LoggerConfig:
@@ -69,6 +95,7 @@ class LevelFormatter(logging.Formatter):
 
 # -------- factory --------
 def get_logger(cfg: LoggerConfig) -> logging.Logger:
+    enable_windows_ansi()
     lvl = _normalize_level(cfg.level)
     logger = logging.getLogger(cfg.name)
     logger.setLevel(lvl)

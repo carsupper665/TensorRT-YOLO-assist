@@ -4,7 +4,10 @@ import os
 import time
 import dxcam
 import numpy as np
-import threading, queue
+import threading
+import ctypes
+
+from utils.common import MouseMode, MODE_TO_STR
 from typing import Tuple
 from simple_pid import PID
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -14,7 +17,6 @@ from inference import BaseEngine
 from pynput.mouse import Button, Listener
 from pynput import keyboard as KB
 
-import ctypes
 from dxcam.dxcam import INFINITE, WAIT_FAILED
 from serial.serialutil import PortNotOpenError, SerialException
 from dxcam.util.timer import (
@@ -122,7 +124,6 @@ def fixed_cap(
         f"Screen Capture FPS: {int(self._DXCamera__frame_count / (time.perf_counter() - self._DXCamera__capture_start_time))}"
     )
 
-
 class Main(QObject):
     image_queue = pyqtSignal(
         object, object, object, object
@@ -134,6 +135,7 @@ class Main(QObject):
     def __init__(self, args: dict | str, no_gui: bool = True):
         self.running = False
         self._is_cleaned = False # 管理線程狀態
+        self.tick = 0
 
         if not isinstance(args, dict) and not isinstance(args, str):
             raise TypeError("Config most be dict or str")
@@ -150,7 +152,6 @@ class Main(QObject):
             log_level = "DEBUG"
         cfg = LoggerConfig(name="AimSys", level=log_level)
         self.LOGGER = get_logger(cfg)
-
         self.no_gui = no_gui
 
         self.LOGGER.info(f"{C['cyan']}Log level set to: {log_level}{C['r']}\n")
@@ -298,6 +299,7 @@ class Main(QObject):
             raise ValueError("Serial port not specified in configuration.")
         self.m = USBMouse(serial_port)
         self.LOGGER.debug(f"Mouse initialized on port {serial_port}.")
+        self.current_mouse_mode = MouseMode.Off
 
     def init_engine(self):
         path = self.args.get("model").get("file_path")
@@ -353,18 +355,19 @@ class Main(QObject):
         if button == getattr(Button, self.toggle_aim):
             if pressed:
                 self.aim = not self.aim
+                self.current_mouse_mode += 1
+                if self.current_mouse_mode >= MouseMode.Mix+1:
+                    self.current_mouse_mode = MouseMode.Off
+
                 self.LOGGER.info(
-                    f"{C['green'] if self.aim else C['red']}Aimbot toggled to {'ON' if self.aim else 'OFF'}"
+                    f"Mode switch to {C['cyan']}{MODE_TO_STR[self.current_mouse_mode]}{C['r']}"
                 )
                 if not self.no_gui:
                     self.on_trigger.emit(self.aim)
 
-        if button == getattr(Button, self.toggle_aiming) and self.aim:
+        if button == getattr(Button, self.toggle_aiming) and self.current_mouse_mode != MouseMode.Off:
             self.aiming = pressed
             self.LOGGER.info(f"Aimbot aiming {'started' if pressed else 'stopped'}")
-
-    # def grab_screen(self):
-    #     return self.cam.get_latest_frame()
 
     def _dx_grab_screen(self):
         return self.cam.get_latest_frame()
@@ -373,7 +376,6 @@ class Main(QObject):
         return np.asarray(self.cam.grab(self.box))
 
     def target_list(self, boxes, confidences, classes):
-        # boxes: Nx4, confidences: N, classes: N
         if len(boxes) == 0:
             return None
 
@@ -429,19 +431,31 @@ class Main(QObject):
             # rel_y = self.pidy(atan2(-rel_y, self.detect_length))
         return rel_x, rel_y
 
-    def lock_target(self, T, s=0.5):
-        if T is None or not self.aiming:
+    def lock_target(self, T, mouse_mode: int, tick, s=0.5):
+        if not self.aiming:
             self.pidx(0)
             self.pidy(0)
             return
+        jitter = [(4,4), (-2, -1), (-3, -3)]
+        moveto_x: int
+        moveto_y: int
 
-        moveto_x, moveto_y = self.get_move_dis_fast(T[0], T[1], T[2])
-
-        self.m.send_mouse_move(moveto_x * s, moveto_y * s, False)
-        # self.LOGGER.debug(f"MOVE {int(moveto_x*s)}, {int(moveto_y*s)}")
-
+        if mouse_mode == MouseMode.AimBot and T is not None:
+            moveto_x, moveto_y = self.get_move_dis_fast(T[0], T[1], T[2])
+            self.m.send_mouse_move(moveto_x * s, moveto_y * s, False)
+        elif mouse_mode == MouseMode.Jitter:
+            moveto_x, moveto_y = jitter[tick]
+            self.m.send_mouse_move(moveto_x, moveto_y, False)
+            self.LOGGER.debug(f"MOVE {int(moveto_x)}, {int(moveto_y)}")
+        elif mouse_mode == MouseMode.Mix:
+            jit_x, jit_y = jitter[tick]
+            moveto_x, moveto_y = 0, 0
+            if T is not None:
+                moveto_x, moveto_y = self.get_move_dis_fast(T[0], T[1], T[2])
+            self.m.send_mouse_move(moveto_x * s + jit_x, moveto_y * s +jit_y, False)
         self.pidx(0)
         self.pidy(0)
+        # self.LOGGER.debug(f"MOVE {int(moveto_x*s)}, {int(moveto_y*s)}")
 
     def silent(self, T):
         if T is None or not self.silent_aiming:
@@ -453,8 +467,10 @@ class Main(QObject):
 
     def forward(
         self,
+        tick=0
     ):
         is_aim = self.aim
+        cmm = self.current_mouse_mode
         is_silent = self.silent_aim
         img = self.grab_screen()
 
@@ -462,11 +478,12 @@ class Main(QObject):
             self.LOGGER.warning("No frame captured from camera.")
             return
 
-        if is_aim or is_silent:
+        if cmm != MouseMode.Off or is_silent:
+            if tick > 2:
+                tick = 0
             boxes, confidences, classes = self.engine.forward(img)
             T = self.target_list(boxes, confidences, classes)
-            if is_aim:
-                self.lock_target(T, self.mms)
+            self.lock_target(T, cmm, tick, self.mms)
 
             # if is_silent:
             #     self.silent(T)
@@ -479,6 +496,7 @@ class Main(QObject):
                     classes,
                 )
         else:
+            tick=0
             time.sleep(0.001)
             if not self.no_gui:
                 self.image_queue.emit(
@@ -493,6 +511,7 @@ class Main(QObject):
         if self.running:
             self.LOGGER.warning("Already running")
             return
+        self.current_mouse_mode = MouseMode.Off
         self._is_cleaned = False
         self.running = True
         self.LOGGER.info("Starting main process")
@@ -547,7 +566,10 @@ class Main(QObject):
             self.listener.start()
 
             while self.running:
-                self.forward()
+                self.tick += 1
+                if self.tick > 2:
+                    self.tick = 0
+                self.forward(self.tick)
 
         except TypeError as te:
             sys.__excepthook__(type(te), te, None)

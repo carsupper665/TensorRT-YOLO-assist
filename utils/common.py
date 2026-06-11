@@ -18,11 +18,21 @@
 import argparse
 import os
 import ctypes
+import dataclasses
 from typing import Optional, List
 
 import numpy as np
 import tensorrt as trt
 from cuda import cuda, cudart
+
+@dataclasses.dataclass
+class MouseMode:
+    Off:    int = 0
+    AimBot: int = 1
+    Jitter: int = 2
+    Mix:    int = 3
+
+MODE_TO_STR = {0: "Off", 1: "AimBot", 2: "Jitter", 3: "Mix"}
 
 try:
     # Sometimes python does not understand FileNotFoundError

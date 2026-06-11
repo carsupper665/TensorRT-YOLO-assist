@@ -1,3 +1,4 @@
+from utils.common import MouseMode
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 from PyQt6.QtGui import QMouseEvent
@@ -22,6 +23,8 @@ class OSD(QWidget):
 
     def __init__(self, parent):
         super().__init__(parent)
+
+        self.mouse_mode = MouseMode.Off
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.ToolTip)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -69,12 +72,31 @@ class OSD(QWidget):
         self.msg.setText("Aim Bot: OFF")
         self.msg.setStyleSheet("color: red")
         self.fps_msg.setText("FPS: n/a")
+        self.mouse_mode = MouseMode.Off
         self.show()
 
     @pyqtSlot(bool)
     def on_trigger(self, b: bool):
-        self.msg.setStyleSheet(f"color: {'green' if b else 'red'}")
-        self.msg.setText(f"Aim Bot: {'ON' if b else 'OFF'}")
+
+        self.mouse_mode += 1
+        if self.mouse_mode > MouseMode.Mix:
+            self.mouse_mode = 0
+
+        if self.mouse_mode == MouseMode.Off:
+            self.msg.setStyleSheet(f"color: red")
+            self.msg.setText(f"Aim Bot: OFF")
+
+        if self.mouse_mode == MouseMode.AimBot:
+            self.msg.setStyleSheet(f"color: green")
+            self.msg.setText(f"Aim Bot: On")
+
+        if self.mouse_mode == MouseMode.Jitter:
+            self.msg.setStyleSheet(f"color: yellow")
+            self.msg.setText(f"Jitter: On")
+
+        if self.mouse_mode == MouseMode.Mix:
+            self.msg.setStyleSheet(f"color: cyan")
+            self.msg.setText(f"Mix Mode: On")
 
     @pyqtSlot(str)
     def _on_fps(self, fps: str):

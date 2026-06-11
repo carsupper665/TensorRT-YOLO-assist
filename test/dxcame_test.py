@@ -52,7 +52,7 @@ def load_yaml(path: str) -> dict:
         # copy default
         import shutil
 
-        shutil.copy("config/default.yaml", path)
+        shutil.copy("../config/default.yaml", path)
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     #  dx_came()
     #  print("testing MSS")
     #  mss_came()
-    cfg = load_yaml("./config/config.yaml")
+    cfg = load_yaml("../config/config.yaml")
     print(len(cfg))
     # for i in cfg:
     #     if isinstance(cfg[i], dict):
