@@ -2,6 +2,7 @@ import importlib
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 class FakeSignal:
@@ -15,8 +16,31 @@ class FakeLogger:
 
 
 class FakeCamera:
+    def __init__(self, capturing=True):
+        self.start_calls = []
+        self.capturing = capturing
+
+    def start(self, **kwargs):
+        self.start_calls.append(kwargs)
+        return self
+
+    def is_capturing(self):
+        return self.capturing
+
+
+class FakeCameraWithoutCaptureStatus:
     def __init__(self):
         self.start_calls = []
+
+    def start(self, **kwargs):
+        self.start_calls.append(kwargs)
+        return self
+
+
+class FakeCameraWithCaptureProperty:
+    def __init__(self, capturing=True):
+        self.start_calls = []
+        self.is_capturing = capturing
 
     def start(self, **kwargs):
         self.start_calls.append(kwargs)
@@ -105,7 +129,7 @@ class MainEnsureCameraTest(unittest.TestCase):
         instance = object.__new__(main.Main)
         instance.cam_type = "obs"
         instance.box = (10, 20, 30, 40)
-        instance.cam = FakeCamera()
+        instance.cam = FakeCameraWithoutCaptureStatus()
         instance.LOGGER = FakeLogger()
         instance._on_dxcam_reinit = False
 
@@ -115,6 +139,72 @@ class MainEnsureCameraTest(unittest.TestCase):
             instance.cam.start_calls,
             [{"region": (10, 20, 30, 40), "target_fps": 240}],
         )
+
+    def test_ensure_camera_raises_when_dxcam_reports_not_capturing(self):
+        main = self.load_main_module()
+        instance = object.__new__(main.Main)
+        instance.cam_type = "dxcam"
+        instance.box = (10, 20, 30, 40)
+        instance.cam = FakeCamera(capturing=False)
+        instance.LOGGER = FakeLogger()
+        instance._on_dxcam_reinit = False
+
+        with self.assertRaisesRegex(RuntimeError, "Camera failed to start capturing"):
+            instance._ensure_camera()
+
+    def test_ensure_camera_accepts_dxcam_capture_status_property(self):
+        main = self.load_main_module()
+        instance = object.__new__(main.Main)
+        instance.cam_type = "dxcam"
+        instance.box = (10, 20, 30, 40)
+        instance.cam = FakeCameraWithCaptureProperty(capturing=True)
+        instance.LOGGER = FakeLogger()
+        instance._on_dxcam_reinit = False
+
+        instance._ensure_camera()
+
+        self.assertEqual(
+            instance.cam.start_calls,
+            [{"region": (10, 20, 30, 40), "target_fps": 240}],
+        )
+
+    def test_ensure_camera_raises_when_dxcam_capture_status_property_is_false(self):
+        main = self.load_main_module()
+        instance = object.__new__(main.Main)
+        instance.cam_type = "dxcam"
+        instance.box = (10, 20, 30, 40)
+        instance.cam = FakeCameraWithCaptureProperty(capturing=False)
+        instance.LOGGER = FakeLogger()
+        instance._on_dxcam_reinit = False
+
+        with self.assertRaisesRegex(RuntimeError, "Camera failed to start capturing"):
+            instance._ensure_camera()
+
+
+    def test_cleanup_timeout_waits_on_cleanup_event_instead_of_sleep_polling(self):
+        main = self.load_main_module()
+
+        class FakeCleanupEvent:
+            def __init__(self):
+                self.wait_calls = []
+
+            def wait(self, timeout):
+                self.wait_calls.append(timeout)
+                instance._is_cleaned = True
+                return True
+
+        instance = object.__new__(main.Main)
+        instance._is_cleaned = False
+        instance._cleanup_done_event = FakeCleanupEvent()
+        instance.no_gui = True
+        instance.LOGGER = FakeLogger()
+        instance.cleanup = lambda pause: (_ for _ in ()).throw(AssertionError("cleanup should not run after clean event"))
+
+        with mock.patch.object(main.time, "sleep") as sleep, mock.patch.object(main.time, "time", side_effect=[0.0, 0.0]):
+            instance._interruption_when_time_out()
+
+        self.assertEqual(instance._cleanup_done_event.wait_calls, [0.05])
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":

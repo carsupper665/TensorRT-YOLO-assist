@@ -11,3 +11,6 @@ config_bk.yaml
 build/
 dist/
 *.bat
+*.lnk
+.idea/*
+.sisyphus/*

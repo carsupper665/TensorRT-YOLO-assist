@@ -1,5 +1,6 @@
 # def get_latest_frame(self) -> ndarray[tuple[int, ...], dtype[Any]]
 import cv2
+import time
 
 import numpy as np
 
@@ -15,6 +16,8 @@ class OBSCapture:
         self.width = w
         self.height = h
         self.region = None
+        self.retry_backoff_s = 0.001
+        self.max_drain_frames = 5
         self.cam = cv2.VideoCapture(id)
         if not self.cam.isOpened():
             raise RuntimeError('Failed to open camera')
@@ -32,12 +35,30 @@ class OBSCapture:
     def is_capturing(self) -> bool:
         return self.cam.isOpened()
 
+    def _crop_region(self, frame):
+        if self.region is not None:
+            left, top, right, bottom = self.region
+            return frame[top:bottom, left:right]
+        return frame
+
+    def _read_latest_frame(self):
+        if hasattr(self.cam, "grab") and hasattr(self.cam, "retrieve"):
+            grabbed = False
+            try:
+                for _ in range(self.max_drain_frames):
+                    if not self.cam.grab():
+                        break
+                    grabbed = True
+            except AttributeError:
+                grabbed = False
+            if grabbed:
+                return self.cam.retrieve()
+        return self.cam.read()
+
     def get_latest_frame(self) -> np.ndarray[tuple[int, ...], np.dtype[Any]]:
         for _ in range(20):
-            ret, frame = self.cam.read()
+            ret, frame = self._read_latest_frame()
             if ret:
-                if self.region is not None:
-                    left, top, right, bottom = self.region
-                    return frame[top:bottom, left:right]
-                return frame
+                return self._crop_region(frame)
+            time.sleep(self.retry_backoff_s)
         raise RuntimeError('Failed to get latest frame')

@@ -78,6 +78,10 @@ class BaseEngine(object):
 
         # 預先建立主機輸出緩衝，避免每幀分配
         self.h_outputs = [np.empty(o["shape"], dtype=o["dtype"]) for o in self.outputs]
+        input_dtype = self.inputs[0]["dtype"]
+        self.h_input = np.empty((3, self.imgsz[0], self.imgsz[1]), dtype=input_dtype)
+        self._rgb_input = np.empty((self.imgsz[0], self.imgsz[1], 3), dtype=np.uint8)
+        self._input_scale = input_dtype.type(1.0 / 255.0)
 
         # CUDA stream
         self.stream = cudart.cudaStreamCreate()[1]
@@ -98,7 +102,7 @@ class BaseEngine(object):
 
     def infer(self, img):
         # 轉型為引擎期望 dtype，確保連續
-        inp = np.ascontiguousarray(img, dtype=self.inputs[0]["dtype"])
+        inp = img if img.flags.c_contiguous and img.dtype == self.inputs[0]["dtype"] else np.ascontiguousarray(img, dtype=self.inputs[0]["dtype"])
         # H2D
         cudart.cudaMemcpyAsync(
             self.inputs[0]["allocation"],  # dst: device ptr
@@ -125,33 +129,18 @@ class BaseEngine(object):
 
     def forward(self, image, swap=(2, 0, 1)):
         # 若你的 engine 已內含前處理與 NMS，這段可對齊 engine 期待的輸入
-        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        img = img.transpose(swap)
-        img = np.ascontiguousarray(img, dtype=np.float32) / 255.0
+        if image.shape[:2] != self._rgb_input.shape[:2]:
+            self._rgb_input = np.empty((*image.shape[:2], 3), dtype=np.uint8)
+            self.h_input = np.empty((3, *image.shape[:2]), dtype=self.inputs[0]["dtype"])
+        cv2.cvtColor(image, cv2.COLOR_BGR2RGB, dst=self._rgb_input)
+        np.multiply(self._rgb_input.transpose(swap), self._input_scale, out=self.h_input, casting="unsafe")
 
-        num, final_boxes, final_scores, final_cls_inds = self.infer(img)
-        ratio, dwdh = 1.0, (0.0, 0.0)
+        num, final_boxes, final_scores, final_cls_inds = self.infer(self.h_input)
+        count = int(num[0])
 
-        dwdh = np.asarray(dwdh * 2, dtype=np.float32)
-        final_boxes -= dwdh
-        final_boxes = np.reshape(final_boxes / ratio, (-1, 4))
-        final_scores = np.reshape(final_scores, (-1, 1))
-        final_cls_inds = np.reshape(final_cls_inds, (-1, 1))
-        dets = np.concatenate(
-            [
-                np.array(final_boxes)[: int(num[0])],
-                np.array(final_scores)[: int(num[0])],
-                np.array(final_cls_inds)[: int(num[0])],
-            ],
-            axis=-1,
-        )
-
-        if dets is not None:
-            final_boxes, final_scores, final_cls_inds = (
-                dets[:, :4],
-                dets[:, 4],
-                dets[:, 5],
-            )
+        final_boxes = final_boxes.reshape(-1, 4)[:count]
+        final_scores = final_scores.reshape(-1)[:count]
+        final_cls_inds = final_cls_inds.reshape(-1)[:count]
         self._update_infer_status()
         return final_boxes, final_scores, final_cls_inds
 

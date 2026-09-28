@@ -329,6 +329,7 @@ class HighQualityTimer:
         self.start_ns = time.perf_counter_ns()
         self.last_ns = self.start_ns
         self.frame_times_ms = deque(maxlen=avg_size)
+        self._frame_times_total_ms = 0.0
         self.frame_count = 0
 
     def update(self):
@@ -341,9 +342,12 @@ class HighQualityTimer:
         self.frame_count += 1
 
         if dt_ms > 0:
+            if self.frame_times_ms.maxlen is not None and len(self.frame_times_ms) == self.frame_times_ms.maxlen:
+                self._frame_times_total_ms -= self.frame_times_ms[0]
             self.frame_times_ms.append(dt_ms)
+            self._frame_times_total_ms += dt_ms
 
-        avg_ms = sum(self.frame_times_ms) / len(self.frame_times_ms) if self.frame_times_ms else 0
+        avg_ms = self._frame_times_total_ms / len(self.frame_times_ms) if self.frame_times_ms else 0
         fps = 1000.0 / avg_ms if avg_ms > 0 else 0
 
         return {

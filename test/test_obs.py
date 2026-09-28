@@ -2,6 +2,7 @@ import importlib
 import sys
 import types
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -12,12 +13,16 @@ class FakeTimer:
 
 
 class FakeVideoCapture:
-    def __init__(self, camera_id, opened=True, reads=None):
+    def __init__(self, camera_id, opened=True, reads=None, grabbed_frames=None):
         self.camera_id = camera_id
         self.opened = opened
         self.reads = list(reads or [])
+        self.grabbed_frames = list(grabbed_frames) if grabbed_frames is not None else None
+        self.last_grabbed_frame = None
         self.set_calls = []
         self.read_calls = 0
+        self.grab_calls = 0
+        self.retrieve_calls = 0
 
     def isOpened(self):
         return self.opened
@@ -31,6 +36,21 @@ class FakeVideoCapture:
         if self.reads:
             return self.reads.pop(0)
         return False, None
+
+    def grab(self):
+        if self.grabbed_frames is None:
+            raise AttributeError("grab unavailable")
+        self.grab_calls += 1
+        if self.grabbed_frames:
+            self.last_grabbed_frame = self.grabbed_frames.pop(0)
+            return True
+        return False
+
+    def retrieve(self):
+        self.retrieve_calls += 1
+        if self.last_grabbed_frame is None:
+            return False, None
+        return True, self.last_grabbed_frame
 
 
 class OBSCaptureTest(unittest.TestCase):
@@ -53,9 +73,9 @@ class OBSCaptureTest(unittest.TestCase):
         if self._original_common is not None:
             sys.modules["utils.common"] = self._original_common
 
-    def load_obs_module(self, opened=True, reads=None):
+    def load_obs_module(self, opened=True, reads=None, grabbed_frames=None):
         def video_capture(camera_id):
-            capture = FakeVideoCapture(camera_id, opened=opened, reads=reads)
+            capture = FakeVideoCapture(camera_id, opened=opened, reads=reads, grabbed_frames=grabbed_frames)
             self.capture_instances.append(capture)
             return capture
 
@@ -96,6 +116,30 @@ class OBSCaptureTest(unittest.TestCase):
         self.assertIs(capture.get_latest_frame(), frame)
         self.assertEqual(self.capture_instances[0].read_calls, 1)
 
+    def test_get_latest_frame_drains_buffered_obs_frames_and_returns_newest(self):
+        old_frame = np.zeros((2, 3, 4), dtype=np.uint8)
+        latest_frame = np.ones((2, 3, 4), dtype=np.uint8)
+        obs = self.load_obs_module(grabbed_frames=[old_frame, latest_frame])
+
+        capture = obs.OBSCapture(w=1920, h=1080)
+
+        self.assertIs(capture.get_latest_frame(), latest_frame)
+        self.assertEqual(self.capture_instances[0].retrieve_calls, 1)
+        self.assertEqual(self.capture_instances[0].read_calls, 0)
+
+    def test_get_latest_frame_bounds_continuously_successful_grab_drain(self):
+        frame = np.full((2, 3, 4), 7, dtype=np.uint8)
+        obs = self.load_obs_module()
+        capture = obs.OBSCapture(w=1920, h=1080)
+        capture.max_drain_frames = 5
+        fake_cam = self.capture_instances[0]
+        fake_cam.grabbed_frames = [frame] * 100
+
+        self.assertIs(capture.get_latest_frame(), frame)
+        self.assertEqual(fake_cam.grab_calls, 5)
+        self.assertEqual(fake_cam.retrieve_calls, 1)
+        self.assertEqual(fake_cam.read_calls, 0)
+
     def test_start_accepts_dxcam_style_region_and_target_fps(self):
         frame = np.arange(4 * 5 * 3, dtype=np.uint8).reshape((4, 5, 3))
         obs = self.load_obs_module(reads=[(True, frame)])
@@ -118,6 +162,18 @@ class OBSCaptureTest(unittest.TestCase):
 
         self.assertIs(result, frame)
         self.assertEqual(self.capture_instances[0].read_calls, 3)
+
+    def test_get_latest_frame_waits_between_failed_reads(self):
+        frame = np.ones((2, 3, 4), dtype=np.uint8)
+        obs = self.load_obs_module(reads=[(False, None), (False, None), (True, frame)])
+
+        capture = obs.OBSCapture(w=1920, h=1080)
+
+        with mock.patch.object(obs.time, "sleep") as sleep:
+            self.assertIs(capture.get_latest_frame(), frame)
+
+        self.assertEqual(sleep.call_count, 2)
+        self.assertTrue(all(call.args[0] > 0 for call in sleep.call_args_list))
 
     def test_get_latest_frame_raises_after_retry_limit_is_exhausted(self):
         obs = self.load_obs_module(reads=[(False, None)] * 20)
