@@ -6,6 +6,9 @@ from .home_page import HomePage
 from .visualize_page import VisualizePage
 from .setting_page import SettingPage
 from .on_screen_disply import OSD
+from .osd_page import OsdPage, OsdController
+from .config_store import ConfigStore
+from .threads import SysInfoWorker
 
 # from .threads import SaveCfg
 from .ui_error import *
@@ -31,4 +34,8 @@ __all__ = [
     "FATAL",
     "SettingPage",
     "OSD",
+    "OsdPage",
+    "OsdController",
+    "ConfigStore",
+    "SysInfoWorker",
 ]

@@ -26,6 +26,9 @@ font-size: 14px;
 color: #FFFFFF;
 """
 
+# 由其他頁面管理的區塊，不顯示在設定表單，存檔時保留原值
+_EXTERNAL_KEYS = ("osd",)
+
 
 class SettingPage(QWidget):
     on_exception = pyqtSignal(type, object)
@@ -35,6 +38,7 @@ class SettingPage(QWidget):
         self.setObjectName("SettingPage")
         self._widgets = {}  # path(tuple) -> widget
         self.parent = parent
+        self._store = None
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -76,10 +80,32 @@ class SettingPage(QWidget):
         v.addWidget(self.save_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
     # 對外：建立表單
-    def build(self, args: dict, target_yaml: str):
+    def build(self, args: dict, target_yaml: str, store=None):
         self._target_yaml = target_yaml
+        if store is not None and store is not self._store:
+            self._store = store
+            store.changed.connect(self._on_store_changed)
         self._clear_form()
-        self._make_settings(self._form, args, ())
+        self._make_settings(
+            self._form, {k: v for k, v in args.items() if k not in _EXTERNAL_KEYS}, ()
+        )
+
+    @pyqtSlot(tuple, object)
+    def _on_store_changed(self, path: tuple, value):
+        # 其他頁面 (例如主頁快速開關) 改了設定 -> 同步表單，避免存檔時蓋回舊值
+        w = self._widgets.get(path)
+        if w is None or isinstance(w, list):
+            return
+        w.blockSignals(True)
+        try:
+            if isinstance(w, QCheckBox):
+                w.setChecked(bool(value))
+            elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
+                w.setValue(value)
+            elif isinstance(w, QLineEdit):
+                w.setText(str(value))
+        finally:
+            w.blockSignals(False)
 
     # 對外：讀回目前值
     def values(self) -> dict:
@@ -105,6 +131,10 @@ class SettingPage(QWidget):
                 if not path:
                     return
             data = self.values()  # 先在 UI 執行緒取快照
+            if self._store is not None and path == self._store.path:
+                self._store.replace(data, keep=_EXTERNAL_KEYS)
+                self._on_saved(path)
+                return
             self.save_btn.setEnabled(False)
 
             # 啟 worker 執行緒

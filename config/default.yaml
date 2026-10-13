@@ -36,3 +36,10 @@ debug: True # Works well with UI
 log_level: "info" # Options: debug, info, warning, error, Only works when running in no-GUI mode
 
 auto_update: True
+
+osd: # 由 OSD 頁面管理
+  enabled: True
+  monitor: "" # 空字串 = 自動使用目前主視窗所在的顯示器
+  corner: top_left # top_left / top_right / bottom_left / bottom_right
+  offset_x: 16
+  offset_y: 16

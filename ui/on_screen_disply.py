@@ -1,7 +1,12 @@
-from utils.common import MouseMode
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
+from utils.mouse_mode import MouseMode
+from utils.osd_layout import compute_osd_pos
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtGui import QMouseEvent, QScreen
+
+from .theme import MODE_COLORS
+
+_MODE_TEXT = ["Aim Bot: OFF", "Aim Bot: On", "Jitter: On", "Mix Mode: On"]
 
 _BASE_STYLE = """
 QWidget { background-color: rgba(34, 34, 34, 180); border:1px solid #444; border-radius:8px; }
@@ -25,6 +30,12 @@ class OSD(QWidget):
         super().__init__(parent)
 
         self.mouse_mode = MouseMode.Off
+        self._running = False  # 主系統執行中 (非預覽)
+        self._placement: tuple[QScreen, str, int, int] | None = None
+
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.timeout.connect(self._end_preview)
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.ToolTip)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -63,40 +74,73 @@ class OSD(QWidget):
         self.setStyleSheet(_BASE_STYLE % {"accent": self._accent})
 
     def _stop_aim_bot(self):
-        self.hide()
+        self.hide_osd()
         self.stop_aim_sys.emit()
 
-    def show_osd(self, px=None, py=None):
-        self.move(0, 0)
+    def show_osd(self, mode: int = MouseMode.Off):
+        self._preview_timer.stop()
+        self._running = True
         self.lt.setText("Aim Bot")
-        self.msg.setText("Aim Bot: OFF")
-        self.msg.setStyleSheet("color: red")
         self.fps_msg.setText("FPS: n/a")
-        self.mouse_mode = MouseMode.Off
+        self.set_mode(mode)
+        self._apply_placement()
         self.show()
+        self._apply_placement()  # show 之後尺寸才確定，再對齊一次
 
-    @pyqtSlot(bool)
-    def on_trigger(self, b: bool):
+    def hide_osd(self):
+        self._running = False
+        self._preview_timer.stop()
+        self.hide()
 
-        self.mouse_mode += 1
-        if self.mouse_mode > MouseMode.Mix:
-            self.mouse_mode = 0
+    def preview(self, ms: int = 3000):
+        """未執行時暫時顯示 OSD 讓使用者確認位置；執行中只重新定位。"""
+        if self._running:
+            self._apply_placement()
+            return
+        self.lt.setText("Aim Bot")
+        self.fps_msg.setText("FPS: preview")
+        self.set_mode(self.mouse_mode)
+        self._apply_placement()
+        self.show()
+        self._apply_placement()
+        self._preview_timer.start(ms)
 
-        if self.mouse_mode == MouseMode.Off:
-            self.msg.setStyleSheet(f"color: red")
-            self.msg.setText(f"Aim Bot: OFF")
+    def _end_preview(self):
+        if not self._running:
+            self.hide()
 
-        if self.mouse_mode == MouseMode.AimBot:
-            self.msg.setStyleSheet(f"color: green")
-            self.msg.setText(f"Aim Bot: On")
+    def set_placement(self, screen: QScreen | None, corner: str, ox: int, oy: int):
+        self._placement = (screen, corner, ox, oy) if screen is not None else None
+        if self.isVisible():
+            self._apply_placement()
 
-        if self.mouse_mode == MouseMode.Jitter:
-            self.msg.setStyleSheet(f"color: yellow")
-            self.msg.setText(f"Jitter: On")
+    def _apply_placement(self):
+        if self._placement is None:
+            return
+        screen, corner, ox, oy = self._placement
+        if self.screen() is not screen:
+            self.setScreen(screen)
+        # 不同 DPI 螢幕間移動時尺寸可能改變，尺寸變了就再算一次
+        for _ in range(2):
+            self.adjustSize()
+            size = self.size()
+            g = screen.geometry()
+            x, y = compute_osd_pos(
+                (g.x(), g.y(), g.width(), g.height()),
+                (size.width(), size.height()),
+                corner, ox, oy,
+            )
+            self.move(x, y)
+            if self.size() == size:
+                break
 
-        if self.mouse_mode == MouseMode.Mix:
-            self.msg.setStyleSheet(f"color: cyan")
-            self.msg.setText(f"Mix Mode: On")
+    @pyqtSlot(int)
+    def set_mode(self, mode: int):
+        if not 0 <= mode < len(_MODE_TEXT):
+            mode = MouseMode.Off
+        self.mouse_mode = mode
+        self.msg.setStyleSheet(f"color: {MODE_COLORS[mode]}")
+        self.msg.setText(_MODE_TEXT[mode])
 
     @pyqtSlot(str)
     def _on_fps(self, fps: str):

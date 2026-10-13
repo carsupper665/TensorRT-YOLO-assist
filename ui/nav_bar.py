@@ -63,6 +63,11 @@ class NavBar(QWidget):
         )
         layout.addWidget(self.viewer_btn)
 
+        self.osd_btn = self._make_button(
+            "", icon_path=r"./src/images/osd_btn.svg", page_index=3, tooltip="OSD"
+        )
+        layout.addWidget(self.osd_btn)
+
         layout.addItem(
             QSpacerItem(
                 20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding

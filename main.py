@@ -123,6 +123,7 @@ class Main(QObject):
     on_exception = pyqtSignal(type, Exception)
     finished = pyqtSignal()
     on_trigger = pyqtSignal(bool)
+    mode_changed = pyqtSignal(int)
 
     def __init__(self, args: dict | str, no_gui: bool = True):
         self.running = False
@@ -314,16 +315,24 @@ class Main(QObject):
     def on_click(self, x, y, button, pressed):
         if button == getattr(Button, self.toggle_aim) and pressed:
             self.aim = not self.aim
-            self.current_mouse_mode = (self.current_mouse_mode + 1) % (MouseMode.Mix + 1)
-            self.LOGGER.info(
-                f"Mode switch to {C['cyan']}{MODE_TO_STR[self.current_mouse_mode]}{C['r']}"
-            )
+            self.set_mouse_mode((self.current_mouse_mode + 1) % (MouseMode.Mix + 1))
             if not self.no_gui:
                 self.on_trigger.emit(self.aim)
 
         if button == getattr(Button, self.toggle_aiming) and self.current_mouse_mode != MouseMode.Off:
             self.aiming = pressed
             self.LOGGER.info(f"Aimbot aiming {'started' if pressed else 'stopped'}")
+
+    def set_mouse_mode(self, mode: int):
+        """熱鍵或 UI 切換滑鼠模式 (可從任何執行緒呼叫)。"""
+        if mode not in MODE_TO_STR:
+            return
+        self.current_mouse_mode = mode
+        if mode == MouseMode.Off:
+            self.aiming = False
+        self.LOGGER.info(f"Mode switch to {C['cyan']}{MODE_TO_STR[mode]}{C['r']}")
+        if not self.no_gui:
+            self.mode_changed.emit(mode)
 
     # ------------------------------------------------------------------
     # Screen capture
@@ -601,6 +610,8 @@ class Main(QObject):
             self.LOGGER.warning("Already running")
             return
         self.current_mouse_mode = MouseMode.Off
+        if not self.no_gui:
+            self.mode_changed.emit(MouseMode.Off)
         self._is_cleaned = False
         self.running = True
         self._scheduler_stop_event.clear()

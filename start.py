@@ -49,7 +49,11 @@ if __name__ == "__main__":
         from PyQt6.QtWidgets import QApplication
         import sys
 
+        from PyQt6.QtGui import QFontDatabase
+
         app = QApplication(sys.argv)
+        # 載入隨附字型 (未安裝在系統上時樣式表指定的字型才會生效)
+        QFontDatabase.addApplicationFont("./src/fonts/SourceHanSansTC-Bold.otf")
         window = MainUI(level=args.log, cfg_path=args.cfg)
         window.show()
         # window._clear_all()

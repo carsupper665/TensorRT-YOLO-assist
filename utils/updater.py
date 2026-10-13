@@ -10,7 +10,7 @@ from .logger import get_logger, LoggerConfig
 
 import requests
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.2"
 OWNER = "carsupper665"
 REPO = "TensorRT-YOLO-assist"
 VERSION_URL = f"https://api.github.com/repos/{OWNER}/{REPO}/releases/latest"

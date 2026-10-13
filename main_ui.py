@@ -13,7 +13,7 @@ from packaging.utils import parse_wheel_filename
 from src.logger import get_logger, C, LoggerConfig
 import json
 from pprint import pformat
-from utils.updater import Updater
+from utils.updater import Updater, APP_VERSION
 # from cuda import cudart
 # import importlib, pkgutil, cuda
 
@@ -26,6 +26,8 @@ class MainUI(QMainWindow):
         super().__init__()
         self.args = self._load_yaml(cfg_path)
         self.cfg_path = cfg_path
+        # 所有頁面共用同一份設定；self.args 永遠指向 store.data
+        self.store = ConfigStore(cfg_path, self.args, self)
         if level:
             self.args["log_level"] = level
         log_cfg = LoggerConfig(
@@ -55,6 +57,14 @@ class MainUI(QMainWindow):
 
         self.toast = Toast(self)
         self.toast.fatalTriggered.connect(self._clear_all)
+        self.store.error.connect(
+            lambda _t, e: self._notify(ERROR, "設定儲存失敗", str(e))
+        )
+
+        self._stats_timer = QTimer(self)
+        self._stats_timer.setInterval(500)
+        self._stats_timer.timeout.connect(self._poll_stats)
+        self._sys_info_thread = None
 
         try:
             self.nav_bar = NavBar(self)
@@ -80,15 +90,18 @@ class MainUI(QMainWindow):
 
     def _add_pages(self, cfg_path):
         self.loading_page = LoadingPage()
-        self.home_page = HomePage(self)
+        self.home_page = HomePage(self, self.store, APP_VERSION)
         self.visualize_page = VisualizePage(self)
         self.setting_page = SettingPage(self)
         self.osd = OSD(self)
         self.osd.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.osd_ctrl = OsdController(self.store, self.osd, self, notify=self._notify)
+        self.osd_page = OsdPage(self, self.store, self.osd_ctrl)
         pages = [
             self.home_page,
             self.setting_page,
             self.visualize_page,
+            self.osd_page,
             self.loading_page,
         ]
         for page in pages:
@@ -97,13 +110,16 @@ class MainUI(QMainWindow):
                 page.on_exception.connect(self._on_exception)
         self.content_widget.setCurrentIndex(len(pages) - 1)
         self.visualize_page.osd_fps.connect(self.osd._on_fps)
-        self.setting_page.build(self.args, cfg_path)
+        self.setting_page.build(self.args, cfg_path, self.store)
+        # 視窗顯示後再解析 OSD 顯示器，這樣「當前顯示器」才是主視窗實際所在的螢幕
+        QTimer.singleShot(0, self.osd_ctrl.apply)
 
         # self.content_widget.setCurrentIndex(0)
 
         self.home_page.startRequested.connect(self._start_aim_sys)
         self.home_page.stopRequested.connect(self._stop_aim_sys)
         self.home_page.restartRequested.connect(self._restart_aim_sys)
+        self.home_page.modeRequested.connect(self._set_mouse_mode)
 
         self.osd.stop_aim_sys.connect(self._stop_aim_sys)
 
@@ -163,6 +179,8 @@ class MainUI(QMainWindow):
         # self.stopRequested.connect(self.aim_sys.stop)
 
         self.nav_bar.set_enabled()
+        self.nav_bar.set_active(0)
+        self._load_sys_info()
         self.toast.show_notice(
             INFO,
             "歡迎使用",
@@ -187,14 +205,16 @@ class MainUI(QMainWindow):
         # self.aim_sys.finished.connect(self.work_thread.quit)
         self.aim_sys.finished.connect(self.on_aim_sys_finished)
 
-        self.aim_sys.on_trigger.connect(self.osd.on_trigger)
+        self.aim_sys.mode_changed.connect(self.osd.set_mode)
+        self.aim_sys.mode_changed.connect(self.home_page.set_mode)
 
         self.aim_sys.init_all()
 
     @pyqtSlot()
     def on_aim_sys_finished(self):
         self.LOGGER.debug("Hide osd")
-        self.osd.hide()
+        self.osd_ctrl.stop()
+        self._stats_timer.stop()
         self.home_page.set_running(False)
         self.LOGGER.debug("enabled start btn")
         self.home_page.set_start_enabled(True)
@@ -206,7 +226,8 @@ class MainUI(QMainWindow):
             return
         self.home_page.set_running(True)
         self.work_thread.start()
-        self.osd.show_osd()
+        self.osd_ctrl.start()
+        self._stats_timer.start()
         self.toast.show_notice(
             INFO,
             "系統啟動",
@@ -260,7 +281,8 @@ class MainUI(QMainWindow):
             del self.aim_sys
             self.aim_sys = None
             Main = _reload_main_class()
-            self.args = self._load_yaml(self.cfg_path)
+            self.store.reload()
+            self.args = self.store.data
             self.aim_sys = Main(no_gui=False, args=self.cfg_path)
             self._prepare_worker()
             self.home_page.set_restart_enabled(True)
@@ -281,6 +303,7 @@ class MainUI(QMainWindow):
     def _clear_all(self):
         """Clear all resources and exit the application."""
         self.hide()
+        self.store.flush()
         self.LOGGER.info("Clearing all resources and exiting the application.")
         try:
             if self.aim_sys and hasattr(self.aim_sys, "stop"):
@@ -320,6 +343,55 @@ class MainUI(QMainWindow):
         self.toast.show_notice(FATAL, title, e, 60000, traceback=tb_text)
         self.hide()
         sys.__excepthook__(exctype, e, traceback)
+
+    def _notify(self, level: str, title: str, message: str, ms: int = 5000):
+        self.toast.show_notice(level, title, message, ms, px=self._get_x(), py=self._get_y())
+
+    @pyqtSlot(int)
+    def _set_mouse_mode(self, mode: int):
+        if self.aim_sys is not None and getattr(self.aim_sys, "running", False):
+            self.aim_sys.set_mouse_mode(mode)
+
+    def _poll_stats(self):
+        """執行中每 500ms 讀一次推論 / 排程統計 (純 dict 讀取，不會卡 UI)。"""
+        sys_ = self.aim_sys
+        if sys_ is None or not getattr(sys_, "running", False):
+            return
+        try:
+            eng = getattr(sys_, "engine", None)
+            infer = eng.get_infer_status() if eng is not None else {}
+            sched = sys_.get_scheduler_status()
+        except Exception as e:
+            self.LOGGER.debug(f"poll stats failed: {e}")
+            return
+        # 推論統計只在模式非 Off 時更新，Off 時不顯示舊數字
+        inferring = getattr(sys_, "current_mouse_mode", 0) != 0
+        fps = infer.get("fps") if inferring else None
+        self.home_page.set_stats(
+            {
+                "fps": fps,
+                "frame_ms": infer.get("avg_ms") if inferring else None,
+                "loop_hz": sched.get("control_cadence_hz"),
+            }
+        )
+        # 畫面顯示頁開著時由它更新 OSD FPS，其餘時間由這裡更新
+        if not self.visualize_page.isVisible():
+            self.osd._on_fps(f"FPS: {fps:.0f}" if fps else "FPS: n/a")
+
+    def _load_sys_info(self):
+        if self._sys_info_thread is not None:
+            return
+        self._sys_info_thread = QThread(self)
+        self._sys_info_worker = SysInfoWorker()
+        self._sys_info_worker.moveToThread(self._sys_info_thread)
+        self._sys_info_thread.started.connect(self._sys_info_worker.run)
+        self._sys_info_worker.finished.connect(self.home_page.set_sys_info)
+        self._sys_info_worker.finished.connect(self._sys_info_thread.quit)
+        self._sys_info_thread.start()
+
+    def closeEvent(self, e):
+        self.store.flush()
+        super().closeEvent(e)
 
     def _get_x(self):
         return self.pos().x()
